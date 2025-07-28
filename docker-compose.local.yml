@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # Application StreamNews complète
+  streamnews:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    container_name: streamnews-app
+    ports:
+      - "3000:3000"  # Interface web
+      - "8000:8000"  # Service d'analyse
+    environment:
+      - DATABASE_URL=postgresql://streamnews:streamnews123@postgres:5432/streamnews
+      - REDIS_URL=redis://redis:6379
+      - WEB_URL=http://localhost:3000
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - streamnews-local
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  # Base de données PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: streamnews-postgres
+    environment:
+      POSTGRES_DB: streamnews
+      POSTGRES_USER: streamnews
+      POSTGRES_PASSWORD: streamnews123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - streamnews-local
+    restart: unless-stopped
+
+  # Redis pour la queue de tâches
+  redis:
+    image: redis:7-alpine
+    container_name: streamnews-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - streamnews-local
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  streamnews-local:
+    driver: bridge 
