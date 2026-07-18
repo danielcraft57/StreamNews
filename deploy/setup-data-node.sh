@@ -6,6 +6,7 @@ set -euo pipefail
 APP_DIR="${DEPLOY_PATH:-/opt/streamnews}"
 APP_USER="${DEPLOY_APP_USER:-streamnews}"
 REPO_URL="${REPO_URL:-https://github.com/loupix57/StreamNews.git}"
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-feature/native-cicd-vps}"
 PG_PASSWORD="${POSTGRES_PASSWORD:-streamnews123}"
 # Reseau LAN autorise a joindre Postgres/Redis (adapte si besoin)
 LAN_CIDR="${LAN_CIDR:-192.168.1.0/24}"
@@ -33,20 +34,22 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='streamnews'" | 
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='streamnews'" | grep -q 1 \
   || sudo -u postgres psql -c "CREATE DATABASE streamnews OWNER streamnews;"
 
-# --- Redis : ecoute LAN (sans auth par defaut, restreint au LAN via bind) ---
-# Sur RPi, bind 127.0.0.1 souvent par defaut
+# --- Redis : ecoute LAN ---
 if grep -qE '^bind ' /etc/redis/redis.conf; then
   sed -i 's/^bind .*/bind 0.0.0.0/' /etc/redis/redis.conf
 else
   echo 'bind 0.0.0.0' >> /etc/redis/redis.conf
 fi
-# Protege un minimum : refuse les commandes dangereuses hors local si possible
 sed -i 's/^protected-mode yes/protected-mode no/' /etc/redis/redis.conf || true
 systemctl restart redis-server
 
 if [[ ! -d "$APP_DIR/.git" ]]; then
   mkdir -p "$(dirname "$APP_DIR")"
-  git clone "$REPO_URL" "$APP_DIR"
+  git clone --branch "$DEPLOY_BRANCH" "$REPO_URL" "$APP_DIR"
+else
+  git -C "$APP_DIR" fetch origin
+  git -C "$APP_DIR" checkout "$DEPLOY_BRANCH"
+  git -C "$APP_DIR" reset --hard "origin/$DEPLOY_BRANCH"
 fi
 
 if ! id "$APP_USER" &>/dev/null; then

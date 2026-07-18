@@ -1,41 +1,28 @@
-# Dependencies
+# Deps
 node_modules/
+e2e/node_modules/
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
 *.egg
-MANIFEST
+*.egg-info/
+.eggs/
+dist/
+build/
+wheels/
 
-# Virtual environments
-venv/
+# Envs
 .venv/
+venv/
 env/
 ENV/
-
-# Environment variables
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
 
-# IDE and editors
+# IDE / OS
 .vscode/
 .idea/
 *.swp
@@ -43,53 +30,47 @@ ENV/
 *~
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# Logs
+# Logs / runtime
 logs/
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Runtime data
 pids/
 *.pid
 *.seed
 *.pid.lock
+npm-debug.log*
+yarn-error.log*
 
-# Coverage
+# Coverage / tests
 coverage/
 *.lcov
 .nyc_output
-
-# Redis dump
-dump.rdb
-
-# Celery
-celerybeat-schedule
-celerybeat.pid
-
-# Application
-uploads/
-downloads/
-temp_files/
-cache/
-*.cache
-data/
-
-# SSL
-*.pem
-*.key
-*.crt
-
-# Backup
-*.bak
-*.backup
-*.old
-
-# Playwright / e2e
-e2e/node_modules/
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 e2e/test-results/
 e2e/playwright-report/
 e2e/blob-report/
 e2e/playwright/.cache/
+
+# Data / cache app
+data/
+cache/
+*.cache
+uploads/
+downloads/
+temp_files/
+dump.rdb
+celerybeat-schedule
+celerybeat.pid
+
+# Secrets / certs / backups
+*.pem
+*.key
+*.crt
+*.bak
+*.backup
+*.old
+*.sqlite3

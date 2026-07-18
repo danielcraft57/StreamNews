@@ -5,77 +5,75 @@ Analyseur de flux RSS. Crawl un site, detecte les feeds RSS/Atom, stream la prog
 ## Architecture
 
 ```
-UI (web:3000) --HTTP--> Analyzer FastAPI:8000 --Celery/Redis--> Worker
-              <--WS--   Worker --POST /api/websocket--> Web (broadcast)
+UI (web:3000) --HTTP--> Analyzer FastAPI:8000 --Celery/Redis--> Workers
+              <--WS--   Workers --POST /api/websocket--> Web (broadcast)
                             |
                        PostgreSQL
 ```
 
 | Dossier | Role |
 |---------|------|
-| `web/` | Express + UI statique + WebSocket |
-| `analyzer/` | FastAPI, crawl RSS, taches Celery (`celery_worker.py`) |
-| `scripts/` | install / init-db / dev local |
-| `deploy/` | systemd + setup VPS + deploy.sh |
+| `web/` | Express + UI + WebSocket |
+| `analyzer/` | FastAPI + taches Celery |
+| `scripts/` | install / init-db / dev / e2e-stack |
+| `deploy/` | systemd + setup multi-Pi |
+| `e2e/` | Playwright |
 | `.github/workflows/` | CI + deploy SSH |
 
-Pas de Docker. Postgres et Redis tournent sur la machine hote.
+Pas de Docker.
 
-## Modes de lancement
+## Homelab (IMPORTANT)
 
-**Local :**
+Decoupage fixe sur le cluster :
+
+| Noeud | Role | Services |
+|-------|------|----------|
+| **node6.lan** | `data` | PostgreSQL + Redis uniquement |
+| **node7.lan** | `app` | web + analyzer **sans worker** (UI fluide) |
+| **node8.lan** (+ autres) | `worker` | Celery crawl/traitement RSS |
+
+Les workers partagent la queue Redis de node6 : plus de workers = plus de crawls en parallele.
+
+Docs detaillees : `deploy/HOMELAB.md`
+
+Setup :
+```bash
+# node6
+sudo bash deploy/setup-data-node.sh
+# node7
+sudo DATA_HOST=node6.lan bash deploy/setup-app-node.sh
+# node8
+sudo DATA_HOST=node6.lan WEB_HOST=node7.lan bash deploy/setup-worker-node.sh
+```
+
+Branche de deploy actuelle : `feature/native-cicd-vps` (`DEPLOY_BRANCH`).
+
+## Modes de lancement local
+
 ```bash
 cp .env.example .env
-bash scripts/install.sh
-bash scripts/init-db.sh
-bash scripts/dev.sh
+bash scripts/install.sh && bash scripts/init-db.sh && bash scripts/dev.sh
 ```
-
-**VPS (premiere fois) :**
-```bash
-sudo bash deploy/setup-vps.sh
-```
-
-**VPS (deploys suivants) :** push sur `main` -> GitHub Actions -> `deploy/deploy.sh`
 
 ## Variables d'environnement
 
-Voir `.env.example`.
+Voir `.env.example`. Sur homelab, `.env` hors git dans `/opt/streamnews/.env`.
 
-| Variable | Qui l'utilise | Defaut |
-|----------|---------------|--------|
-| `DATABASE_URL` | analyzer | `postgresql://streamnews:streamnews123@localhost:5432/streamnews` |
-| `REDIS_URL` | analyzer / celery | `redis://localhost:6379/0` |
-| `WEB_URL` | celery (push WS) | `http://localhost:3000` |
-| `ANALYZER_URL` | web (proxy API) | `http://localhost:8000` |
-| `PORT` | web | `3000` |
-
-Sur le VPS, `.env` est hors git (`/opt/streamnews/.env`), charge via `EnvironmentFile=` dans systemd.
+| Variable | Role |
+|----------|------|
+| `DATABASE_URL` | Postgres (souvent `node6.lan`) |
+| `REDIS_URL` | Broker Celery (souvent `node6.lan`) |
+| `WEB_URL` | Push WS depuis workers vers node7 |
+| `ANALYZER_URL` | Proxy API cote web |
+| `STREAMNEWS_ROLE` | `data` / `app` / `worker` / `all` |
 
 ## Secrets GitHub Actions
 
-`DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_PATH`
+`DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_PATH` + var `ENABLE_DEPLOY=true`
 
-## Etat du projet
+## Pieges
 
-Prototype. Fonctionne en grande partie, mais :
-
-- Pas d'auth / rate limit / HTTPS
-- Redis = broker Celery seulement
-- Scripts `build`/`test` dans `web/package.json` sans config derriere
-
-Pages analysees : persistees en table `pages` pendant le crawl.
-Cleanup : tache Celery `cleanup_old_analyses(days=30)`.
-Endpoint : `GET /sites/{id}/pages` (proxy web `/api/sites/:id/pages`).
-
-## Pieges a eviter
-
-1. Celery se lance depuis `analyzer/` : `celery -A celery_worker worker`
-2. `asyncpg` est requis par `database.py`
-3. Ne pas reintroduire Docker sans raison
-4. Ne pas committer `.env`
-
-## Homelab
-
-Voir `deploy/HOMELAB.md`. Roles : `data` (node6), `app` (node7), `worker` (autres Pi).
-Celery partage la queue Redis : plusieurs workers = crawls en parallele.
+1. Celery depuis `analyzer/` : `celery -A celery_worker worker`
+2. Ne pas mettre de worker sur node7 (reserve UI/API)
+3. Ne pas committer `.env`
+4. Pi 2 : `CELERY_CONCURRENCY=1`
