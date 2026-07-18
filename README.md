@@ -109,11 +109,11 @@ sudo systemctl status streamnews-web
 sudo journalctl -u streamnews-analyzer -f
 ```
 
-## Suite possible
+## Homelab multi-Pi
 
-- Reverse proxy HTTPS (nginx/Caddy)
-- Auth / rate limiting
-- Vrais tests automatises
+Voir [deploy/HOMELAB.md](deploy/HOMELAB.md).
+
+Resume : **node6** = Postgres+Redis, **node7** = web+analyzer+worker, autres Pi = workers Celery pour paralleliser le crawl RSS.
 
 ## Licence
 

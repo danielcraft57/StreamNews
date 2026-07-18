@@ -75,8 +75,7 @@ Endpoint : `GET /sites/{id}/pages` (proxy web `/api/sites/:id/pages`).
 3. Ne pas reintroduire Docker sans raison
 4. Ne pas committer `.env`
 
-## Tests
+## Homelab
 
-- Unitaires : `analyzer/tests` (pytest), `web/tests` (Jest)
-- E2E : `e2e/` (Playwright) + `scripts/e2e-stack.sh` (fixture mock :8765, analyzer, celery, web)
-- CI : jobs `python`, `node`, puis `e2e` avec services Postgres/Redis
+Voir `deploy/HOMELAB.md`. Roles : `data` (node6), `app` (node7), `worker` (autres Pi).
+Celery partage la queue Redis : plusieurs workers = crawls en parallele.
