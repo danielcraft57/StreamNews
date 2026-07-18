@@ -61,10 +61,12 @@ Sur le VPS, `.env` est hors git (`/opt/streamnews/.env`), charge via `Environmen
 Prototype. Fonctionne en grande partie, mais :
 
 - Pas d'auth / rate limit / HTTPS
-- Table `pages` prevue mais peu/pas remplie pendant le crawl
-- `cleanup_old_analyses` encore un stub
 - Redis = broker Celery seulement
 - Scripts `build`/`test` dans `web/package.json` sans config derriere
+
+Pages analysees : persistees en table `pages` pendant le crawl.
+Cleanup : tache Celery `cleanup_old_analyses(days=30)`.
+Endpoint : `GET /sites/{id}/pages` (proxy web `/api/sites/:id/pages`).
 
 ## Pieges a eviter
 

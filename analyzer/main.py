@@ -71,6 +71,22 @@ async def get_site(site_id: int):
         if not site:
             raise HTTPException(status_code=404, detail="Site non trouvé")
         return site
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/sites/{site_id}/pages")
+async def get_site_pages(site_id: int):
+    """Récupère les pages analysées d'un site"""
+    try:
+        site = await db.get_site(site_id)
+        if not site:
+            raise HTTPException(status_code=404, detail="Site non trouvé")
+        pages = await db.get_site_pages(site_id)
+        return {"site_id": site_id, "pages": pages}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

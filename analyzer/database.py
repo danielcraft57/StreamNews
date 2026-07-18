@@ -93,4 +93,31 @@ class Database:
                 "SELECT * FROM pages WHERE site_id = $1 ORDER BY analyzed_at DESC",
                 site_id
             )
-            return [dict(row) for row in rows] 
+            return [dict(row) for row in rows]
+
+    async def cleanup_old_analyses(self, days: int = 30) -> int:
+        """Supprime les analyses (sites + pages) plus anciennes que N jours."""
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    DELETE FROM pages
+                    WHERE site_id IN (
+                        SELECT id FROM sites
+                        WHERE created_at < NOW() - make_interval(days => $1)
+                    )
+                    """,
+                    days
+                )
+                result = await conn.execute(
+                    """
+                    DELETE FROM sites
+                    WHERE created_at < NOW() - make_interval(days => $1)
+                    """,
+                    days
+                )
+                try:
+                    return int(result.split()[-1])
+                except (ValueError, IndexError):
+                    return 0
+ 

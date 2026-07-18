@@ -87,6 +87,22 @@ app.get('/api/sites/:id', async (req, res) => {
     }
 });
 
+app.get('/api/sites/:id/pages', async (req, res) => {
+    try {
+        const response = await axios.get(`${ANALYZER_URL}/sites/${req.params.id}/pages`, {
+            timeout: 5000
+        });
+        res.json(response.data);
+    } catch (error) {
+        console.error('Erreur lors de la récupération des pages:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors de la récupération des pages',
+            details: error.message
+        });
+    }
+});
+
 // Route pour recevoir les messages WebSocket du service d'analyse
 app.post('/api/websocket', (req, res) => {
     try {

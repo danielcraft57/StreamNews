@@ -55,27 +55,35 @@ def analyze_site_task(self, site_id: int, url: str, max_pages: int = 50, depth: 
         
         # Création d'un analyseur personnalisé avec callbacks
         class StreamingRSSAnalyzer(RSSAnalyzer):
-            def __init__(self, site_id):
+            def __init__(self, site_id, database):
                 super().__init__()
                 self.site_id = site_id
+                self.db = database
                 self.pages_analyzed = 0
                 self.rss_feeds_found = []
             
             async def find_rss_feeds(self, url: str) -> List[Dict]:
-                """Override pour envoyer des messages en temps réel"""
+                """Override pour envoyer des messages en temps réel et persister les pages"""
                 rss_feeds = await super().find_rss_feeds(url)
+                page_title = getattr(self, '_last_page_title', None)
                 
-                # Notification de page analysée
                 self.pages_analyzed += 1
+                await self.db.add_page_analysis(
+                    self.site_id,
+                    url,
+                    page_title,
+                    rss_feeds
+                )
+
                 send_websocket_message({
                     'type': 'page_analyzed',
                     'site_id': self.site_id,
                     'url': url,
+                    'title': page_title,
                     'pages_analyzed': self.pages_analyzed,
                     'total_pages': max_pages
                 })
                 
-                # Notification des flux RSS trouvés
                 for feed in rss_feeds:
                     if feed not in self.rss_feeds_found:
                         self.rss_feeds_found.append(feed)
@@ -89,8 +97,7 @@ def analyze_site_task(self, site_id: int, url: str, max_pages: int = 50, depth: 
                 
                 return rss_feeds
         
-        # Analyse du site avec streaming
-        analyzer = StreamingRSSAnalyzer(site_id)
+        analyzer = StreamingRSSAnalyzer(site_id, db)
         result = loop.run_until_complete(analyzer.analyze_site(url, max_pages, depth))
         
         # Mise à jour des résultats en base
@@ -146,7 +153,7 @@ def analyze_site_task(self, site_id: int, url: str, max_pages: int = 50, depth: 
         }
 
 @celery_app.task
-def cleanup_old_analyses():
+def cleanup_old_analyses(days: int = 30):
     """Nettoyage des anciennes analyses"""
     db = Database()
     
@@ -154,12 +161,10 @@ def cleanup_old_analyses():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(db.init_db())
-        
-        # Suppression des analyses de plus de 30 jours
-        # (à implémenter dans la classe Database)
-        
+        deleted = loop.run_until_complete(db.cleanup_old_analyses(days))
         loop.close()
-        return {'status': 'success', 'message': 'Nettoyage terminé'}
+        return {'status': 'success', 'deleted_sites': deleted, 'days': days}
         
     except Exception as e:
-        return {'status': 'error', 'error': str(e)} 
+        return {'status': 'error', 'error': str(e)}
+ 

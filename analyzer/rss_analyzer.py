@@ -14,6 +14,7 @@ class RSSAnalyzer:
     def __init__(self):
         self.session = None
         self.visited_urls = set()
+        self._last_page_title = None
         self.rss_patterns = [
             r'application/rss\+xml',
             r'application/atom\+xml',
@@ -97,6 +98,10 @@ class RSSAnalyzer:
                     
                 content = await response.text()
                 soup = BeautifulSoup(content, 'html.parser')
+
+                title_tag = soup.find('title')
+                page_title = title_tag.get_text().strip() if title_tag else None
+                self._last_page_title = page_title
                 
                 # Recherche des liens RSS dans les balises link
                 for link in soup.find_all('link'):
