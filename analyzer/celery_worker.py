@@ -10,8 +10,8 @@ from typing import List, Dict
 # Configuration Celery
 celery_app = Celery('streamnews_analyzer')
 celery_app.conf.update(
-    broker_url=os.getenv('REDIS_URL', 'redis://redis:6379/0'),
-    result_backend=os.getenv('REDIS_URL', 'redis://redis:6379/0'),
+    broker_url=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
+    result_backend=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
     task_serializer='json',
     accept_content=['json'],
     result_serializer='json',
@@ -25,7 +25,7 @@ celery_app.conf.update(
 def send_websocket_message(message):
     """Envoie un message via WebSocket au service web"""
     try:
-        web_url = os.getenv('WEB_URL', 'http://web:3000')
+        web_url = os.getenv('WEB_URL', 'http://localhost:3000')
         requests.post(f'{web_url}/api/websocket', json=message, timeout=5)
     except Exception as e:
         print(f"Erreur lors de l'envoi du message WebSocket: {e}")

@@ -16,7 +16,7 @@ const wss = new WebSocket.Server({ server });
 const clients = new Set();
 
 // Configuration des variables d'environnement
-const ANALYZER_URL = process.env.ANALYZER_URL || 'http://analyzer:8000';
+const ANALYZER_URL = process.env.ANALYZER_URL || 'http://localhost:8000';
 
 // Middleware de sécurité
 app.use(helmet({

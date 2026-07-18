@@ -5,6 +5,7 @@ beautifulsoup4==4.12.2
 lxml==4.9.3
 feedparser==6.0.10
 psycopg2-binary==2.9.9
+asyncpg==0.29.0
 redis==5.0.1
 celery==5.3.4
 aiohttp==3.9.1

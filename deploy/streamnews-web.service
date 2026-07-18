@@ -1,0 +1,16 @@
+[Unit]
+Description=StreamNews Web (Node/Express)
+After=network.target
+
+[Service]
+Type=simple
+User=streamnews
+Group=streamnews
+WorkingDirectory=/opt/streamnews/web
+EnvironmentFile=/opt/streamnews/.env
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

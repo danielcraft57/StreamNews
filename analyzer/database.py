@@ -5,7 +5,7 @@ import json
 
 class Database:
     def __init__(self):
-        self.database_url = os.getenv("DATABASE_URL", "postgresql://streamnews:streamnews123@postgres:5432/streamnews")
+        self.database_url = os.getenv("DATABASE_URL", "postgresql://streamnews:streamnews123@localhost:5432/streamnews")
         self.pool = None
 
     async def init_db(self):

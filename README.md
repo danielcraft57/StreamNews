@@ -1,191 +1,96 @@
-# StreamNews - Analyseur de Flux RSS
+# StreamNews
 
-Une application Docker Swarm qui analyse automatiquement les sites web pour détecter et récupérer les flux RSS en temps réel.
+Analyseur de flux RSS. Crawl un site, detecte les feeds RSS/Atom, suit la progression en temps reel via WebSocket.
 
-## 🚀 Fonctionnalités
+## Stack
 
-- **Analyse automatique** : Crawl intelligent des sites web
-- **Détection RSS** : Identification automatique des flux RSS/Atom
-- **Streaming temps réel** : Suivi en direct de l'avancement via WebSocket
-- **Interface moderne** : Interface web responsive et intuitive
-- **Scalabilité** : Architecture microservices avec Docker Swarm
-- **Persistance** : Stockage PostgreSQL des résultats
+- **web/** - Express + UI + WebSocket (port 3000)
+- **analyzer/** - FastAPI + crawl RSS + taches Celery (port 8000)
+- **PostgreSQL** + **Redis** (installes sur la machine, pas de Docker)
 
-## 🏗️ Architecture
+## Prerequis
 
-L'application est composée de plusieurs services :
+- Python 3.11+
+- Node.js 18+
+- PostgreSQL 15+
+- Redis 7+
 
-- **Web** : Interface utilisateur (Node.js + Express + WebSocket)
-- **Analyzer** : Service d'analyse des sites (Python + FastAPI)
-- **Worker** : Traitement des tâches en arrière-plan (Celery)
-- **PostgreSQL** : Base de données pour les résultats
-- **Redis** : Queue de tâches et cache
-
-## 📋 Prérequis
-
-- Docker et Docker Compose
-- Docker Swarm activé
-- Au moins 4GB de RAM disponible
-
-## 🛠️ Installation et Démarrage
-
-### 1. Initialiser Docker Swarm
+## Installation locale
 
 ```bash
-docker swarm init
+cp .env.example .env
+# Adapte DATABASE_URL / REDIS_URL si besoin
+
+# Cree user + DB Postgres (exemple)
+# createuser streamnews
+# createdb -O streamnews streamnews
+
+bash scripts/install.sh
+bash scripts/init-db.sh
+bash scripts/dev.sh
 ```
 
-### 2. Déployer l'application
+UI : http://localhost:3000
+
+## Variables d'environnement
+
+Voir `.env.example`. Les principales :
+
+| Variable | Role |
+|----------|------|
+| `DATABASE_URL` | Connexion Postgres |
+| `REDIS_URL` | Broker Celery |
+| `WEB_URL` | URL du web (push WebSocket depuis le worker) |
+| `ANALYZER_URL` | URL de l'API analyzer (proxy cote web) |
+| `PORT` | Port du service web (defaut 3000) |
+
+## Deploy VPS (premiere fois)
+
+Sur le serveur (Ubuntu/Debian), en root :
 
 ```bash
-# Déployer la stack
-docker stack deploy -c docker-stack.yml streamnews
-
-# Vérifier le déploiement
-docker stack services streamnews
+git clone https://github.com/loupix/StreamNews.git /opt/streamnews
+cd /opt/streamnews
+bash deploy/setup-vps.sh
 ```
 
-### 3. Accéder à l'application
+Le script installe Postgres, Redis, Node, cree l'utilisateur `streamnews`, les unites systemd, et demarre les services.
 
-Ouvre ton navigateur sur : http://localhost:3000
+Adapte `/opt/streamnews/.env` (mots de passe, etc.).
 
-## 🎯 Utilisation
+Le user SSH de deploy doit pouvoir faire `sudo systemctl restart streamnews-*` sans mot de passe (sudoers).
 
-### Analyser un site
+## CI/CD (GitHub Actions)
 
-1. Saisis l'URL du site à analyser
-2. Configure le nombre maximum de pages (25-200)
-3. Définis la profondeur de crawl (2-5 niveaux)
-4. Clique sur "Lancer l'analyse"
+- **CI** (`.github/workflows/ci.yml`) : sur push/PR `main` - install Python/Node + smoke checks
+- **Deploy** (`.github/workflows/deploy.yml`) : sur push `main` - CI puis SSH + `deploy/deploy.sh`
 
-### Suivi en temps réel
+Secrets a creer dans le repo GitHub (Settings > Secrets and variables > Actions) :
 
-- **Barre de progression** : Suit l'avancement page par page
-- **Logs en direct** : Voir chaque page analysée
-- **Flux RSS détectés** : Apparition en temps réel
-- **Statut de l'analyse** : En cours, terminé, ou erreur
+| Secret | Exemple |
+|--------|---------|
+| `DEPLOY_HOST` | `203.0.113.10` |
+| `DEPLOY_USER` | `streamnews` ou un user avec sudo |
+| `DEPLOY_SSH_KEY` | cle privee SSH |
+| `DEPLOY_PATH` | `/opt/streamnews` |
 
-### Consulter les résultats
+## Services systemd
 
-- **Liste des sites** : Tous les sites analysés
-- **Détails par site** : Flux RSS trouvés, pages analysées
-- **Historique** : Conserve tous les résultats
-
-## 🔧 Configuration
-
-### Variables d'environnement
+- `streamnews-web`
+- `streamnews-analyzer`
+- `streamnews-worker`
 
 ```bash
-# Base de données
-DATABASE_URL=postgresql://streamnews:streamnews123@postgres:5432/streamnews
-
-# Redis
-REDIS_URL=redis://redis:6379
-
-# Service web
-WEB_URL=http://web:3000
+sudo systemctl status streamnews-web
+sudo journalctl -u streamnews-analyzer -f
 ```
 
-### Scaling des services
+## Suite possible
 
-```bash
-# Augmenter le nombre de workers
-docker service scale streamnews_worker=5
+- Reverse proxy HTTPS (nginx/Caddy)
+- Auth / rate limiting
+- Vrais tests automatises
 
-# Augmenter les analyseurs
-docker service scale streamnews_analyzer=3
-```
+## Licence
 
-## 📊 Monitoring
-
-### Vérifier l'état des services
-
-```bash
-# Services actifs
-docker service ls
-
-# Logs d'un service
-docker service logs streamnews_web
-
-# Métriques
-docker stats
-```
-
-### Logs en temps réel
-
-```bash
-# Tous les services
-docker service logs -f streamnews_web
-docker service logs -f streamnews_analyzer
-docker service logs -f streamnews_worker
-```
-
-## 🐛 Dépannage
-
-### Problèmes courants
-
-1. **Service ne démarre pas**
-   ```bash
-   docker service logs streamnews_web
-   ```
-
-2. **Base de données inaccessible**
-   ```bash
-   docker service logs streamnews_postgres
-   ```
-
-3. **WebSocket ne fonctionne pas**
-   - Vérifier que le port 3000 est accessible
-   - Contrôler les logs du service web
-
-### Redémarrage d'un service
-
-```bash
-docker service update --force streamnews_web
-```
-
-## 🔒 Sécurité
-
-- **HTTPS** : Configure un reverse proxy pour la production
-- **Authentification** : À implémenter selon tes besoins
-- **Rate limiting** : Limite les requêtes par IP
-- **Validation** : Toutes les URLs sont validées
-
-## 📈 Performance
-
-### Optimisations recommandées
-
-- **Workers** : Ajuste le nombre selon la charge
-- **Base de données** : Index sur les colonnes fréquemment utilisées
-- **Cache** : Utilise Redis pour les résultats fréquents
-- **Réseau** : Optimise la bande passante pour le crawling
-
-### Métriques de performance
-
-- **Pages par minute** : 50-100 pages selon la complexité
-- **Mémoire** : ~512MB par worker
-- **CPU** : Utilisation modérée, pics lors du parsing
-
-## 🤝 Contribution
-
-1. Fork le projet
-2. Crée une branche feature
-3. Commit tes changements
-4. Push vers la branche
-5. Ouvre une Pull Request
-
-## 📄 Licence
-
-MIT License - Voir le fichier LICENSE pour plus de détails.
-
-## 🆘 Support
-
-Pour toute question ou problème :
-
-1. Consulte les logs des services
-2. Vérifie la documentation
-3. Ouvre une issue sur GitHub
-
----
-
-**StreamNews** - Analyse intelligent des flux RSS avec Docker Swarm 🚀 
+MIT
