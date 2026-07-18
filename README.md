@@ -113,7 +113,11 @@ sudo journalctl -u streamnews-analyzer -f
 
 Voir [deploy/HOMELAB.md](deploy/HOMELAB.md).
 
-Resume : **node6** = Postgres+Redis, **node7** = web+analyzer+worker, autres Pi = workers Celery pour paralleliser le crawl RSS.
+| Noeud | Role |
+|-------|------|
+| **node6** | Postgres + Redis |
+| **node7** | web + analyzer (pas de worker) |
+| **node8+** | workers Celery (crawl RSS) |
 
 ## Licence
 
