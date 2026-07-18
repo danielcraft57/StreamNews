@@ -63,18 +63,22 @@ Le user SSH de deploy doit pouvoir faire `sudo systemctl restart streamnews-*` s
 ## Tests
 
 ```bash
-# Python
+# Unitaires Python
 cd analyzer
 pip install -r requirements.txt -r requirements-dev.txt
 pytest -q
 
-# Node
+# Unitaires Node
 cd web
 npm ci
 npm test
+
+# E2E Playwright (Postgres + Redis doivent tourner)
+bash scripts/e2e-stack.sh
+cd e2e && npm install && npx playwright install chromium && npm test
 ```
 
-La CI GitHub Actions lance ces tests sur chaque PR / push `main`.
+La CI GitHub Actions lance unitaires + e2e (services Postgres/Redis, stack complete, Chromium).
 
 ## CI/CD (GitHub Actions)
 

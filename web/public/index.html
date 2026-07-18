@@ -262,17 +262,17 @@
             <div class="card">
                 <h2><i class="fas fa-search"></i> Analyser un site</h2>
                 
-                <div id="status" class="status"></div>
+                <div id="status" class="status" data-testid="status"></div>
                 
-                <form id="analyzeForm">
+                <form id="analyzeForm" data-testid="analyze-form">
                     <div class="form-group">
                         <label for="url">URL du site à analyser</label>
-                        <input type="url" id="url" name="url" placeholder="https://example.com" required>
+                        <input type="url" id="url" name="url" data-testid="url-input" placeholder="https://example.com" required>
                     </div>
                     
                     <div class="form-group">
                         <label for="maxPages">Nombre maximum de pages</label>
-                        <select id="maxPages" name="maxPages">
+                        <select id="maxPages" name="maxPages" data-testid="max-pages">
                             <option value="25">25 pages</option>
                             <option value="50" selected>50 pages</option>
                             <option value="100">100 pages</option>
@@ -282,7 +282,7 @@
                     
                     <div class="form-group">
                         <label for="depth">Profondeur de crawl</label>
-                        <select id="depth" name="depth">
+                        <select id="depth" name="depth" data-testid="depth">
                             <option value="2">2 niveaux</option>
                             <option value="3" selected>3 niveaux</option>
                             <option value="4">4 niveaux</option>
@@ -290,12 +290,12 @@
                         </select>
                     </div>
                     
-                    <button type="submit" class="btn" id="analyzeBtn">
+                    <button type="submit" class="btn" id="analyzeBtn" data-testid="analyze-btn">
                         <i class="fas fa-play"></i> Lancer l'analyse
                     </button>
                 </form>
                 
-                <div id="loading" class="loading" style="display: none;">
+                <div id="loading" class="loading" style="display: none;" data-testid="loading">
                     <div class="spinner"></div>
                     <p>Analyse en cours...</p>
                 </div>
@@ -305,16 +305,16 @@
             <div class="card">
                 <h2><i class="fas fa-list"></i> Sites analysés</h2>
                 
-                <div id="sitesList" class="sites-list">
+                <div id="sitesList" class="sites-list" data-testid="sites-list">
                     <p>Chargement des sites...</p>
                 </div>
             </div>
         </div>
 
         <!-- Résultats détaillés -->
-        <div class="card" id="resultsCard" style="display: none;">
+        <div class="card" id="resultsCard" style="display: none;" data-testid="results-card">
             <h2><i class="fas fa-chart-bar"></i> Résultats de l'analyse</h2>
-            <div id="results"></div>
+            <div id="results" data-testid="results"></div>
         </div>
     </div>
 

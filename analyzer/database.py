@@ -52,7 +52,7 @@ class Database:
         async with self.pool.acquire() as conn:
             if rss_feeds is not None:
                 await conn.execute(
-                    "UPDATE sites SET status = $1, rss_feeds = $2, total_pages_analyzed = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4",
+                    "UPDATE sites SET status = $1, rss_feeds = $2::jsonb, total_pages_analyzed = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4",
                     status, json.dumps(rss_feeds), total_pages, site_id
                 )
             else:
@@ -65,7 +65,7 @@ class Database:
         """Ajoute l'analyse d'une page"""
         async with self.pool.acquire() as conn:
             await conn.execute(
-                "INSERT INTO pages (site_id, url, title, rss_feeds) VALUES ($1, $2, $3, $4)",
+                "INSERT INTO pages (site_id, url, title, rss_feeds) VALUES ($1, $2, $3, $4::jsonb)",
                 site_id, url, title, json.dumps(rss_feeds or [])
             )
 

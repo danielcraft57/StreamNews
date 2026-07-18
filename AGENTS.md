@@ -75,8 +75,8 @@ Endpoint : `GET /sites/{id}/pages` (proxy web `/api/sites/:id/pages`).
 3. Ne pas reintroduire Docker sans raison
 4. Ne pas committer `.env`
 
-## Style du repo
+## Tests
 
-- Explications simples, francais OK pour la doc
-- Pas de refactors massifs hors sujet
-- Corriger boot / deps / env avant d'ajouter des features
+- Unitaires : `analyzer/tests` (pytest), `web/tests` (Jest)
+- E2E : `e2e/` (Playwright) + `scripts/e2e-stack.sh` (fixture mock :8765, analyzer, celery, web)
+- CI : jobs `python`, `node`, puis `e2e` avec services Postgres/Redis
