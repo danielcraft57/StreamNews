@@ -5,7 +5,7 @@ set -euo pipefail
 
 APP_DIR="${DEPLOY_PATH:-/opt/streamnews}"
 APP_USER="${DEPLOY_APP_USER:-streamnews}"
-REPO_URL="${REPO_URL:-https://github.com/loupix/StreamNews.git}"
+REPO_URL="${REPO_URL:-https://github.com/loupix57/StreamNews.git}"
 
 echo "==> Setup VPS StreamNews -> $APP_DIR (user $APP_USER)"
 

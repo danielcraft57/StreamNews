@@ -167,8 +167,13 @@ function broadcastMessage(message) {
 // Export de la fonction pour l'utiliser dans d'autres modules
 global.broadcastMessage = broadcastMessage;
 
-server.listen(PORT, () => {
-    console.log(`Serveur web démarré sur le port ${PORT}`);
-    console.log(`Service d'analyse: ${ANALYZER_URL}`);
-    console.log('WebSocket activé');
-}); 
+module.exports = { app, server, broadcastMessage, ANALYZER_URL };
+
+if (require.main === module) {
+    server.listen(PORT, () => {
+        console.log(`Serveur web démarré sur le port ${PORT}`);
+        console.log(`Service d'analyse: ${ANALYZER_URL}`);
+        console.log('WebSocket activé');
+    });
+}
+ 

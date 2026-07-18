@@ -49,7 +49,7 @@ Voir `.env.example`. Les principales :
 Sur le serveur (Ubuntu/Debian), en root :
 
 ```bash
-git clone https://github.com/loupix/StreamNews.git /opt/streamnews
+git clone https://github.com/loupix57/StreamNews.git /opt/streamnews
 cd /opt/streamnews
 bash deploy/setup-vps.sh
 ```
@@ -59,6 +59,22 @@ Le script installe Postgres, Redis, Node, cree l'utilisateur `streamnews`, les u
 Adapte `/opt/streamnews/.env` (mots de passe, etc.).
 
 Le user SSH de deploy doit pouvoir faire `sudo systemctl restart streamnews-*` sans mot de passe (sudoers).
+
+## Tests
+
+```bash
+# Python
+cd analyzer
+pip install -r requirements.txt -r requirements-dev.txt
+pytest -q
+
+# Node
+cd web
+npm ci
+npm test
+```
+
+La CI GitHub Actions lance ces tests sur chaque PR / push `main`.
 
 ## CI/CD (GitHub Actions)
 
@@ -73,6 +89,10 @@ Secrets a creer dans le repo GitHub (Settings > Secrets and variables > Actions)
 | `DEPLOY_USER` | `streamnews` ou un user avec sudo |
 | `DEPLOY_SSH_KEY` | cle privee SSH |
 | `DEPLOY_PATH` | `/opt/streamnews` |
+
+Sans ces secrets, configure aussi la variable repo `ENABLE_DEPLOY=true` (Settings > Variables) pour activer le job Deploy. Tant que ce n'est pas fait, seul le CI tests tourne.
+
+Repo : https://github.com/loupix57/StreamNews
 
 ## Services systemd
 
