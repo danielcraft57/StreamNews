@@ -46,3 +46,10 @@ def test_remove_duplicate_rss():
     assert len(unique) == 2
     assert unique[0]["title"] == "A"
     assert unique[1]["url"] == "https://example.com/atom"
+
+
+def test_internal_links_can_be_sliced_as_list():
+    """Regresssion: get_internal_links renvoie un set, analyze_site doit le caster."""
+    urls = {"https://example.com/a", "https://example.com/b", "https://example.com/c"}
+    as_list = list(urls)
+    assert len(as_list[:2]) == 2

@@ -65,8 +65,10 @@ test.describe('Analyse e2e', () => {
     }
 
     expect(site.status).toBe('completed');
-    expect(Array.isArray(site.rss_feeds)).toBeTruthy();
-    expect(site.rss_feeds.length).toBeGreaterThan(0);
+    const feeds = typeof site.rss_feeds === 'string' ? JSON.parse(site.rss_feeds) : site.rss_feeds;
+    expect(Array.isArray(feeds)).toBeTruthy();
+    expect(feeds.length).toBeGreaterThan(0);
+    expect(site.total_pages_analyzed).toBeGreaterThan(0);
 
     const pages = await request.get(`/api/sites/${created.site_id}/pages`);
     expect(pages.ok()).toBeTruthy();

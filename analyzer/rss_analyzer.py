@@ -51,9 +51,9 @@ class RSSAnalyzer:
                 all_rss_feeds.extend(home_rss)
                 
                 # Crawl des pages internes
-                internal_urls = await self.get_internal_links(base_url, base_url, depth)
+                internal_urls = list(await self.get_internal_links(base_url, base_url, depth))
                 
-                for url in internal_urls[:max_pages - 1]:  # -1 car on a déjà analysé la page d'accueil
+                for url in internal_urls[:max(0, max_pages - 1)]:  # -1 car on a déjà analysé la page d'accueil
                     if pages_analyzed >= max_pages:
                         break
                         
