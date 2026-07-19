@@ -43,7 +43,13 @@ app.use(helmet({
 app.use(compression());
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.js') || filePath.endsWith('.html')) {
+            res.setHeader('Cache-Control', 'no-cache');
+        }
+    },
+}));
 
 // Evite le 404 navigateur sur /favicon.ico
 app.get('/favicon.ico', (req, res) => {
