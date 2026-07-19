@@ -22,8 +22,9 @@ ENV/
 .env.*
 !.env.example
 
-# Notes agents (local)
+# Notes agents / homelab (local)
 AGENTS.md
+deploy/HOMELAB.md
 
 # IDE / OS
 .vscode/
