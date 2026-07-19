@@ -123,6 +123,41 @@ app.get('/api/sites/:id/pages', async (req, res) => {
     }
 });
 
+app.get('/api/sites/:id/articles', async (req, res) => {
+    try {
+        const response = await axios.get(`${ANALYZER_URL}/sites/${req.params.id}/articles`, {
+            timeout: 15000,
+            params: { limit: req.query.limit || 100 }
+        });
+        res.json(response.data);
+    } catch (error) {
+        console.error('Erreur lors de la récupération des articles:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors de la récupération des articles',
+            details: error.message
+        });
+    }
+});
+
+app.post('/api/sites/:id/ingest-articles', async (req, res) => {
+    try {
+        const response = await axios.post(
+            `${ANALYZER_URL}/sites/${req.params.id}/ingest-articles`,
+            {},
+            { timeout: 120000 }
+        );
+        res.json(response.data);
+    } catch (error) {
+        console.error('Erreur lors de l\'ingestion des articles:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors de l\'ingestion des articles',
+            details: error.message
+        });
+    }
+});
+
 // Route pour recevoir les messages WebSocket du service d'analyse
 app.post('/api/websocket', (req, res) => {
     try {

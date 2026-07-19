@@ -32,7 +32,7 @@ class Database:
         if 'rss_feeds' in data:
             data['rss_feeds'] = self._parse_json_field(data['rss_feeds'])
         # Dates asyncpg -> iso pour le front
-        for key in ('created_at', 'updated_at', 'analyzed_at'):
+        for key in ('created_at', 'updated_at', 'analyzed_at', 'published_at', 'fetched_at'):
             if key in data and data[key] is not None and hasattr(data[key], 'isoformat'):
                 data[key] = data[key].isoformat()
         return data
@@ -65,6 +65,27 @@ class Database:
                     rss_feeds JSONB DEFAULT '[]'::jsonb,
                     analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
+            """)
+
+            # Articles extraits des flux RSS
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS articles (
+                    id SERIAL PRIMARY KEY,
+                    site_id INTEGER REFERENCES sites(id) ON DELETE CASCADE,
+                    feed_url VARCHAR(1000) NOT NULL,
+                    title VARCHAR(1000),
+                    link VARCHAR(2000) NOT NULL,
+                    summary TEXT,
+                    author VARCHAR(500),
+                    published_at TIMESTAMP,
+                    guid VARCHAR(2000),
+                    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (site_id, link)
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_articles_site_published
+                ON articles (site_id, published_at DESC NULLS LAST)
             """)
 
     async def create_site_analysis(self, url: str, status: str = "pending") -> int:
@@ -124,10 +145,126 @@ class Database:
             )
             return [self._row_to_dict(row) for row in rows]
 
+    async def get_site_articles(self, site_id: int, limit: int = 100) -> List[Dict]:
+        """Récupère les articles RSS d'un site (plus récents d'abord)."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM articles
+                WHERE site_id = $1
+                ORDER BY published_at DESC NULLS LAST, fetched_at DESC
+                LIMIT $2
+                """,
+                site_id,
+                limit,
+            )
+            return [self._row_to_dict(row) for row in rows]
+
+    async def upsert_article(
+        self,
+        site_id: int,
+        feed_url: str,
+        title: str,
+        link: str,
+        summary: str = None,
+        author: str = None,
+        published_at=None,
+        guid: str = None,
+    ) -> bool:
+        """Insert ou ignore un article (dedup sur site_id+link). Retourne True si cree."""
+        if not link:
+            return False
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO articles
+                    (site_id, feed_url, title, link, summary, author, published_at, guid)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (site_id, link) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    summary = EXCLUDED.summary,
+                    author = EXCLUDED.author,
+                    published_at = COALESCE(EXCLUDED.published_at, articles.published_at),
+                    guid = COALESCE(EXCLUDED.guid, articles.guid),
+                    fetched_at = CURRENT_TIMESTAMP
+                """,
+                site_id,
+                feed_url[:1000],
+                (title or "")[:1000] or None,
+                link[:2000],
+                summary,
+                (author or "")[:500] or None,
+                published_at,
+                (guid or "")[:2000] or None,
+            )
+            return True
+
+    async def ingest_rss_articles(self, site_id: int, feeds: List[Dict], max_per_feed: int = 50) -> int:
+        """Parse chaque flux RSS et stocke les articles. Retourne le nombre upserted."""
+        import feedparser
+        from datetime import datetime, timezone
+        from time import mktime
+
+        feeds = feeds or []
+        seen_feed_urls = set()
+        count = 0
+
+        for feed in feeds:
+            feed_url = (feed.get("url") or "").strip()
+            if not feed_url or feed_url in seen_feed_urls:
+                continue
+            seen_feed_urls.add(feed_url)
+
+            try:
+                parsed = feedparser.parse(feed_url)
+            except Exception:
+                continue
+
+            for entry in (parsed.entries or [])[:max_per_feed]:
+                link = entry.get("link") or entry.get("id") or ""
+                if not link:
+                    continue
+
+                published_at = None
+                published_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+                if published_parsed:
+                    try:
+                        published_at = datetime.fromtimestamp(mktime(published_parsed), tz=timezone.utc).replace(tzinfo=None)
+                    except (OverflowError, ValueError, TypeError):
+                        published_at = None
+
+                summary = entry.get("summary") or entry.get("description") or ""
+                if len(summary) > 4000:
+                    summary = summary[:4000] + "…"
+
+                created = await self.upsert_article(
+                    site_id=site_id,
+                    feed_url=feed_url,
+                    title=entry.get("title") or "Sans titre",
+                    link=link,
+                    summary=summary or None,
+                    author=entry.get("author"),
+                    published_at=published_at,
+                    guid=entry.get("id") or entry.get("guid"),
+                )
+                count += 1
+
+        return count
+
     async def cleanup_old_analyses(self, days: int = 30) -> int:
-        """Supprime les analyses (sites + pages) plus anciennes que N jours."""
+        """Supprime les analyses (articles + pages + sites) plus anciennes que N jours."""
         async with self.pool.acquire() as conn:
             async with conn.transaction():
+                await conn.execute(
+                    """
+                    DELETE FROM articles
+                    WHERE site_id IN (
+                        SELECT id FROM sites
+                        WHERE created_at < NOW() - make_interval(days => $1)
+                    )
+                    """,
+                    days,
+                )
                 await conn.execute(
                     """
                     DELETE FROM pages
@@ -136,14 +273,14 @@ class Database:
                         WHERE created_at < NOW() - make_interval(days => $1)
                     )
                     """,
-                    days
+                    days,
                 )
                 result = await conn.execute(
                     """
                     DELETE FROM sites
                     WHERE created_at < NOW() - make_interval(days => $1)
                     """,
-                    days
+                    days,
                 )
                 try:
                     return int(result.split()[-1])

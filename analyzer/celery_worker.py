@@ -107,6 +107,18 @@ def analyze_site_task(self, site_id: int, url: str, max_pages: int = 50, depth: 
             result['rss_feeds'], 
             result['total_pages_analyzed']
         ))
+
+        # Ingestion des articles depuis les flux detectes
+        articles_count = 0
+        if result.get('rss_feeds'):
+            send_websocket_message({
+                'type': 'articles_ingest_started',
+                'site_id': site_id,
+                'feeds_count': len(result['rss_feeds']),
+            })
+            articles_count = loop.run_until_complete(
+                db.ingest_rss_articles(site_id, result['rss_feeds'])
+            )
         
         # Message de fin d'analyse
         send_websocket_message({
@@ -114,6 +126,7 @@ def analyze_site_task(self, site_id: int, url: str, max_pages: int = 50, depth: 
             'site_id': site_id,
             'url': url,
             'rss_count': len(result['rss_feeds']),
+            'articles_count': articles_count,
             'total_pages': result['total_pages_analyzed'],
             'status': result['status']
         })
@@ -124,6 +137,7 @@ def analyze_site_task(self, site_id: int, url: str, max_pages: int = 50, depth: 
             'site_id': site_id,
             'status': 'success',
             'rss_feeds_count': len(result['rss_feeds']),
+            'articles_count': articles_count,
             'pages_analyzed': result['total_pages_analyzed']
         }
         

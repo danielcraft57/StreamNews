@@ -97,10 +97,14 @@ class StreamNewsApp {
 
     handleAnalysisCompleted(data) {
         if (this.currentAnalysis === data.site_id) {
-            this.updateStatus(`Analyse terminée ! ${data.rss_count} flux RSS trouvés`, 'success');
+            const articlesBit = data.articles_count != null ? ` · ${data.articles_count} articles` : '';
+            this.updateStatus(
+                `Analyse terminée ! ${data.rss_count} flux RSS trouvés${articlesBit}`,
+                'success'
+            );
             this.showLoading(false);
             this.updateProgress(data.total_pages, data.total_pages);
-            this.loadSites(); // Recharger la liste
+            this.loadSites();
             this.currentAnalysis = null;
         }
     }
@@ -210,9 +214,14 @@ class StreamNewsApp {
 
     async showSiteDetails(siteId) {
         try {
-            const response = await fetch(`/api/sites/${siteId}`);
-            const site = await response.json();
+            const [siteRes, articlesRes] = await Promise.all([
+                fetch(`/api/sites/${siteId}`),
+                fetch(`/api/sites/${siteId}/articles?limit=100`)
+            ]);
+            const site = await siteRes.json();
+            const articlesData = articlesRes.ok ? await articlesRes.json() : { articles: [] };
             const feeds = this.parseRssFeeds(site.rss_feeds);
+            const articles = Array.isArray(articlesData.articles) ? articlesData.articles : [];
             
             this.clearResults();
             this.showResults();
@@ -232,18 +241,77 @@ class StreamNewsApp {
                     <div class="rss-feeds">
                         ${feeds.map(feed => `
                             <div class="rss-feed">
-                                <h4>${feed.title || 'Flux RSS'}</h4>
-                                <p><a href="${feed.url}" target="_blank" rel="noopener noreferrer">${feed.url}</a></p>
-                                <small>Type: ${feed.type || '-'} | Source: ${feed.source_page || '-'}</small>
+                                <h4>${this.escapeHtml(feed.title || 'Flux RSS')}</h4>
+                                <p><a href="${this.escapeAttr(feed.url)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(feed.url)}</a></p>
+                                <small>Type: ${this.escapeHtml(feed.type || '-')} | Source: ${this.escapeHtml(feed.source_page || '-')}</small>
                             </div>
                         `).join('')}
                     </div>
+                    <p style="margin-top:12px">
+                        <button type="button" class="btn" data-ingest-site="${siteId}" style="width:auto;padding:10px 16px;font-size:14px">
+                            Recharger les articles des flux
+                        </button>
+                    </p>
                 ` : '<p>Aucun flux RSS trouvé</p>'}
+
+                <h4 style="margin-top:24px">Articles (${articles.length})</h4>
+                ${articles.length > 0 ? `
+                    <div class="rss-feeds" data-testid="articles-list">
+                        ${articles.map(article => `
+                            <div class="rss-feed">
+                                <h4>${this.escapeHtml(article.title || 'Sans titre')}</h4>
+                                <p><a href="${this.escapeAttr(article.link)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(article.link)}</a></p>
+                                ${article.summary ? `<p>${this.escapeHtml(this.stripHtml(article.summary).slice(0, 280))}${this.stripHtml(article.summary).length > 280 ? '…' : ''}</p>` : ''}
+                                <small>
+                                    ${article.published_at ? this.escapeHtml(new Date(article.published_at).toLocaleString()) : 'Date inconnue'}
+                                    ${article.feed_url ? ` | Feed: ${this.escapeHtml(article.feed_url)}` : ''}
+                                </small>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : '<p>Aucun article importé pour le moment. Lance une analyse ou clique « Recharger les articles ».</p>'}
             `;
+
+            const ingestBtn = resultsDiv.querySelector('[data-ingest-site]');
+            if (ingestBtn) {
+                ingestBtn.addEventListener('click', async () => {
+                    ingestBtn.disabled = true;
+                    ingestBtn.textContent = 'Import en cours…';
+                    try {
+                        const res = await fetch(`/api/sites/${siteId}/ingest-articles`, { method: 'POST' });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.error || 'Erreur import');
+                        this.updateStatus(`${data.articles_count || 0} articles traités`, 'success');
+                        await this.showSiteDetails(siteId);
+                    } catch (err) {
+                        this.updateStatus(`Erreur: ${err.message}`, 'error');
+                        ingestBtn.disabled = false;
+                        ingestBtn.textContent = 'Recharger les articles des flux';
+                    }
+                });
+            }
             
         } catch (error) {
             console.error('Erreur lors du chargement des détails:', error);
         }
+    }
+
+    escapeHtml(text) {
+        return String(text ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    escapeAttr(text) {
+        return this.escapeHtml(text).replace(/'/g, '&#39;');
+    }
+
+    stripHtml(html) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html || '';
+        return tmp.textContent || tmp.innerText || '';
     }
 
     updateStatus(message, type) {

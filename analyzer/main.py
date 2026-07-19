@@ -90,6 +90,38 @@ async def get_site_pages(site_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/sites/{site_id}/articles")
+async def get_site_articles(site_id: int, limit: int = 100):
+    """Récupère les articles extraits des flux RSS d'un site"""
+    try:
+        site = await db.get_site(site_id)
+        if not site:
+            raise HTTPException(status_code=404, detail="Site non trouvé")
+        limit = max(1, min(limit, 500))
+        articles = await db.get_site_articles(site_id, limit=limit)
+        return {"site_id": site_id, "articles": articles, "count": len(articles)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/sites/{site_id}/ingest-articles")
+async def ingest_site_articles(site_id: int):
+    """Re-parse les flux deja detectes et (re)importe les articles."""
+    try:
+        site = await db.get_site(site_id)
+        if not site:
+            raise HTTPException(status_code=404, detail="Site non trouvé")
+        feeds = site.get("rss_feeds") or []
+        if not feeds:
+            return {"site_id": site_id, "articles_count": 0, "message": "Aucun flux RSS"}
+        count = await db.ingest_rss_articles(site_id, feeds)
+        return {"site_id": site_id, "articles_count": count}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/health")
 async def health_check():
     """Vérification de l'état du service"""
