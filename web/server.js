@@ -45,6 +45,11 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Evite le 404 navigateur sur /favicon.ico
+app.get('/favicon.ico', (req, res) => {
+    res.redirect(302, '/favicon.svg');
+});
+
 // Routes API
 app.get('/api/health', (req, res) => {
     res.json({ status: 'healthy', service: 'web' });

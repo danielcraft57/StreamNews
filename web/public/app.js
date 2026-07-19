@@ -14,6 +14,15 @@ class StreamNewsApp {
     setupEventListeners() {
         const form = document.getElementById('analyzeForm');
         form.addEventListener('submit', (e) => this.handleAnalyzeSubmit(e));
+
+        // Delegation : evite onclick= inline (bloque par CSP script-src-attr)
+        const sitesList = document.getElementById('sitesList');
+        sitesList.addEventListener('click', (e) => {
+            const item = e.target.closest('.site-item[data-site-id]');
+            if (!item) return;
+            const siteId = Number(item.dataset.siteId);
+            if (siteId) this.showSiteDetails(siteId);
+        });
     }
 
     connectWebSocket() {
@@ -164,7 +173,7 @@ class StreamNewsApp {
             
             if (data.sites && data.sites.length > 0) {
                 sitesList.innerHTML = data.sites.map(site => `
-                    <div class="site-item" onclick="app.showSiteDetails(${site.id})">
+                    <div class="site-item" data-site-id="${site.id}" role="button" tabindex="0">
                         <h4>${site.url}</h4>
                         <div class="site-info">
                             <span class="status ${site.status}">${this.getStatusText(site.status)}</span>
