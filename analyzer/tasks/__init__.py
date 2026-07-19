@@ -17,17 +17,23 @@ from celery import chord, group
 
 from celery_app import celery_app
 from database import Database
+from logging_config import get_logger, setup_logging
 from models import PipelineSummary
 from services.crawl_service import CrawlService
 from services.ingest_service import IngestService
 
-logger = logging.getLogger(__name__)
+# Worker : s'assurer que logs/worker.log est configure
+if not logging.getLogger().handlers:
+    setup_logging(service=os.getenv("STREAMNEWS_SERVICE", "worker"))
+
+logger = get_logger(__name__)
 
 
 def _send_ws(message: dict) -> None:
     try:
         web_url = os.getenv("WEB_URL", "http://localhost:3000")
         requests.post(f"{web_url}/api/websocket", json=message, timeout=5)
+        logger.debug("WS push type=%s site_id=%s", message.get("type"), message.get("site_id"))
     except Exception as exc:
         logger.warning("WS push failed: %s", exc)
 
@@ -46,7 +52,13 @@ async def _crawl_and_persist(site_id: int, url: str, max_pages: int, depth: int)
     await db.init_db()
     await db.update_site_status(site_id, "analyzing")
 
+    pages_done = 0
+    # total provisoire = plafond ; remplace apres discovery par le vrai plan
+    planned_total = {"n": max(1, max_pages)}
+
     async def on_page(page_url, title, feeds):
+        nonlocal pages_done
+        pages_done += 1
         await db.add_page_analysis(site_id, page_url, title, feeds)
         _send_ws(
             {
@@ -54,9 +66,11 @@ async def _crawl_and_persist(site_id: int, url: str, max_pages: int, depth: int)
                 "site_id": site_id,
                 "url": page_url,
                 "title": title,
-                "pages_analyzed": None,
+                "pages_analyzed": pages_done,
+                "total_pages": planned_total["n"],
             }
         )
+        logger.debug("page_analyzed site_id=%s n=%s/%s url=%s", site_id, pages_done, planned_total["n"], page_url)
 
     async def on_feed(feed: dict):
         _send_ws(
@@ -68,15 +82,58 @@ async def _crawl_and_persist(site_id: int, url: str, max_pages: int, depth: int)
                 "source_page": feed.get("source_page"),
             }
         )
+        logger.info("rss_found site_id=%s url=%s", site_id, feed.get("url"))
 
-    service = CrawlService(on_page=on_page, on_feed=on_feed)
-    result = await service.run(url, max_pages=max_pages, depth=depth)
+    async def on_plan(total: int):
+        planned_total["n"] = max(1, int(total))
+        _send_ws(
+            {
+                "type": "progress_update",
+                "site_id": site_id,
+                "current": pages_done,
+                "total": planned_total["n"],
+                "message": f"Plan: {planned_total['n']} page(s) a analyser",
+            }
+        )
+        logger.info("Crawl plan site_id=%s total=%s", site_id, planned_total["n"])
+
+    async def should_cancel() -> bool:
+        return await db.is_cancel_requested(site_id)
+
+    service = CrawlService(on_page=on_page, on_feed=on_feed, on_plan=on_plan)
+    logger.info("Crawl start site_id=%s url=%s max_pages=%s depth=%s", site_id, url, max_pages, depth)
+    _send_ws(
+        {
+            "type": "progress_update",
+            "site_id": site_id,
+            "current": 0,
+            "total": None,
+            "message": "Discovery des liens...",
+        }
+    )
+    result = await service.run(
+        url, max_pages=max_pages, depth=depth, should_cancel=should_cancel
+    )
+    logger.info(
+        "Crawl end site_id=%s status=%s pages=%s feeds=%s",
+        site_id,
+        result.status,
+        result.total_pages_analyzed,
+        len(result.rss_feeds),
+    )
     feeds = [f.model_dump() for f in result.rss_feeds]
+    # Fusionne RSS/Atom (et http/https) qui portent les memes articles
+    from utils import collapse_equivalent_feeds
+
+    feeds = collapse_equivalent_feeds(feeds)
+    status = result.status
+    if await should_cancel():
+        status = "cancelled"
     await db.update_site_status(
-        site_id, result.status, feeds, result.total_pages_analyzed
+        site_id, status, feeds, result.total_pages_analyzed
     )
     return {
-        "status": result.status,
+        "status": status,
         "rss_feeds": feeds,
         "total_pages_analyzed": result.total_pages_analyzed,
         "error": result.error,
@@ -86,6 +143,14 @@ async def _crawl_and_persist(site_id: int, url: str, max_pages: int, depth: int)
 @celery_app.task(bind=True, name="streamnews.crawl_site")
 def crawl_site_task(self, site_id: int, url: str, max_pages: int = 50, depth: int = 3):
     """Etape 1 : crawl + detection feeds, puis fan-out ingest."""
+    logger.info(
+        "crawl_site start site_id=%s url=%s max_pages=%s depth=%s task=%s",
+        site_id,
+        url,
+        max_pages,
+        depth,
+        getattr(self.request, "id", None),
+    )
     _send_ws(
         {
             "type": "analysis_started",
@@ -107,14 +172,62 @@ def crawl_site_task(self, site_id: int, url: str, max_pages: int = 50, depth: in
         _send_ws({"type": "analysis_error", "site_id": site_id, "url": url, "error": str(exc)})
         return {"site_id": site_id, "status": "error", "error": str(exc)}
 
+    if crawl.get("status") == "cancelled":
+        _send_ws(
+            {
+                "type": "analysis_cancelled",
+                "site_id": site_id,
+                "url": url,
+                "total_pages": crawl.get("total_pages_analyzed", 0),
+            }
+        )
+        return {"site_id": site_id, "status": "cancelled"}
+
+    if crawl.get("status") == "error":
+        err = crawl.get("error") or "Erreur pendant le crawl"
+        logger.error("crawl status=error site_id=%s err=%s", site_id, err)
+        _send_ws({"type": "analysis_error", "site_id": site_id, "url": url, "error": err})
+        # On tente quand meme un ingest des feeds trouves sur la home si presents
+        feeds = crawl.get("rss_feeds") or []
+        from utils import collapse_equivalent_feeds
+        feeds = collapse_equivalent_feeds(feeds)
+        if feeds:
+            # persiste les feeds trouves
+            async def _save():
+                db = Database()
+                await db.init_db()
+                await db.update_site_status(
+                    site_id, "error", feeds, crawl.get("total_pages_analyzed", 0)
+                )
+            try:
+                _run(_save())
+            except Exception:
+                pass
+        return {"site_id": site_id, "status": "error", "error": err}
+
     feeds = crawl.get("rss_feeds") or []
-    unique_urls = []
-    seen = set()
-    for f in feeds:
-        u = (f.get("url") or "").strip()
-        if u and u not in seen:
-            seen.add(u)
-            unique_urls.append(u)
+    from utils import collapse_equivalent_feeds
+
+    # Securite : re-collapse au cas ou la liste vient d'un ancien crawl
+    feeds = collapse_equivalent_feeds(feeds)
+    unique_urls = [f["url"] for f in feeds if f.get("url")]
+    logger.info(
+        "crawl_site done site_id=%s status=%s pages=%s feeds=%s",
+        site_id,
+        crawl.get("status"),
+        crawl.get("total_pages_analyzed"),
+        len(unique_urls),
+    )
+
+    _send_ws(
+        {
+            "type": "progress_update",
+            "site_id": site_id,
+            "current": crawl.get("total_pages_analyzed", 0),
+            "total": crawl.get("total_pages_analyzed", 0),
+            "message": f"Crawl terminé ({crawl.get('total_pages_analyzed', 0)} pages) — import de {len(unique_urls)} flux...",
+        }
+    )
 
     _send_ws(
         {

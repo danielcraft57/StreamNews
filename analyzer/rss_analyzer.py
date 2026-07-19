@@ -1,14 +1,14 @@
+from typing import List, Dict, Set, Optional
 import asyncio
 import aiohttp
 from bs4 import BeautifulSoup
 import feedparser
 from urllib.parse import urljoin, urlparse
 import re
-from typing import List, Dict, Set, Optional
-import logging
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 class RSSAnalyzer:
     def __init__(self):
@@ -88,85 +88,62 @@ class RSSAnalyzer:
             }
 
     async def find_rss_feeds(self, url: str) -> List[Dict]:
-        """Trouve les flux RSS sur une page donnée"""
-        rss_feeds = []
-        
+        """Trouve les flux RSS sur une page donnée (fetch HTTP)."""
         try:
-            async with self.session.get(url) as response:
+            async with self.session.get(url, allow_redirects=True) as response:
                 if response.status != 200:
-                    return rss_feeds
-                    
-                content = await response.text()
-                soup = BeautifulSoup(content, 'html.parser')
-
-                title_tag = soup.find('title')
-                page_title = title_tag.get_text().strip() if title_tag else None
-                self._last_page_title = page_title
-                
-                # Recherche des liens RSS dans les balises link
-                for link in soup.find_all('link'):
-                    href = link.get('href')
-                    rel = link.get('rel', [])
-                    type_attr = link.get('type', '')
-                    
-                    if href and self.is_rss_link(href, rel, type_attr):
-                        rss_url = urljoin(url, href)
-                        title = link.get('title', 'Flux RSS')
-                        
-                        # Validation du flux RSS
-                        if await self.validate_rss_feed(rss_url):
-                            rss_feeds.append({
-                                'url': rss_url,
-                                'title': title,
-                                'type': type_attr,
-                                'source_page': url
-                            })
-                
-                # Recherche de liens RSS dans le contenu
-                for link in soup.find_all('a', href=True):
-                    href = link.get('href')
-                    text = link.get_text().lower()
-                    
-                    if href and self.is_rss_link_by_text(href, text):
-                        rss_url = urljoin(url, href)
-                        
-                        if await self.validate_rss_feed(rss_url):
-                            rss_feeds.append({
-                                'url': rss_url,
-                                'title': link.get_text().strip(),
-                                'type': 'detected',
-                                'source_page': url
-                            })
-                
-                # Recherche de patterns RSS dans le HTML
-                rss_patterns = [
-                    r'feed\.xml',
-                    r'rss\.xml',
-                    r'atom\.xml',
-                    r'\.rss$',
-                    r'\.xml$'
-                ]
-                
-                for pattern in rss_patterns:
-                    matches = re.findall(pattern, content, re.IGNORECASE)
-                    for match in matches:
-                        # Construction de l'URL RSS
-                        if match.startswith('http'):
-                            rss_url = match
-                        else:
-                            rss_url = urljoin(url, match)
-                        
-                        if await self.validate_rss_feed(rss_url):
-                            rss_feeds.append({
-                                'url': rss_url,
-                                'title': f'Flux RSS détecté ({match})',
-                                'type': 'pattern',
-                                'source_page': url
-                            })
-                            
+                    return []
+                try:
+                    content = await response.text(errors="ignore")
+                except Exception:
+                    return []
+                final = str(response.url)
+                return await self.extract_rss_from_html(final, content)
         except Exception as e:
-            logger.error(f"Erreur lors de la recherche de flux RSS sur {url}: {e}")
-            
+            logger.error("Erreur recherche RSS sur %s: %s", url, e)
+            return []
+
+    async def extract_rss_from_html(
+        self, url: str, content: str, soup=None
+    ) -> List[Dict]:
+        """Detecte les flux RSS dans un HTML deja telecharge (pas de re-fetch page)."""
+        rss_feeds: List[Dict] = []
+        try:
+            if soup is None:
+                soup = BeautifulSoup(content, "html.parser")
+
+            title_tag = soup.find("title")
+            page_title = title_tag.get_text().strip() if title_tag else None
+            self._last_page_title = page_title
+
+            for link in soup.find_all("link"):
+                href = link.get("href")
+                rel = link.get("rel", [])
+                type_attr = link.get("type", "")
+                if href and self.is_rss_link(href, rel, type_attr):
+                    rss_url = urljoin(url, href)
+                    if await self.validate_rss_feed(rss_url):
+                        rss_feeds.append({
+                            "url": rss_url,
+                            "title": link.get("title", "Flux RSS"),
+                            "type": type_attr,
+                            "source_page": url,
+                        })
+
+            for link in soup.find_all("a", href=True):
+                href = link.get("href")
+                text = link.get_text().lower()
+                if href and self.is_rss_link_by_text(href, text):
+                    rss_url = urljoin(url, href)
+                    if await self.validate_rss_feed(rss_url):
+                        rss_feeds.append({
+                            "url": rss_url,
+                            "title": link.get_text().strip(),
+                            "type": "detected",
+                            "source_page": url,
+                        })
+        except Exception as e:
+            logger.error("Erreur extract RSS %s: %s", url, e)
         return rss_feeds
 
     def is_rss_link(self, href: str, rel: List[str], type_attr: str) -> bool:
@@ -196,72 +173,137 @@ class RSSAnalyzer:
         return any(indicator in text for indicator in text_indicators)
 
     async def validate_rss_feed(self, url: str) -> bool:
-        """Valide qu'une URL est bien un flux RSS valide"""
+        """Valide qu'une URL est bien un flux RSS valide (cache URL normalisee)."""
+        from utils import normalize_url
+
+        key = normalize_url(url) or url
+        if not hasattr(self, "_feed_cache"):
+            self._feed_cache = {}
+        if key in self._feed_cache:
+            return self._feed_cache[key]
+
+        ok = False
         try:
-            async with self.session.get(url, timeout=10) as response:
+            async with self.session.get(url, timeout=10, allow_redirects=True) as response:
                 if response.status != 200:
+                    self._feed_cache[key] = False
                     return False
-                    
-                content = await response.text()
-                
-                # Tentative de parsing avec feedparser
+                content = await response.text(errors="ignore")
                 feed = feedparser.parse(content)
-                return len(feed.entries) > 0 or feed.feed.get('title')
-                
+                ok = bool(len(feed.entries) > 0 or feed.feed.get("title"))
+        except Exception:
+            ok = False
+        self._feed_cache[key] = ok
+        return ok
+
+    async def get_internal_links(
+        self,
+        base_url: str,
+        current_url: str,
+        depth: int,
+        max_links: int = 200,
+    ) -> Set[str]:
+        """BFS borne : collectea des liens internes sans exploser en recursion.
+
+        Avant : recursion depth=N sur chaque lien = crawl entier du site (blocage).
+        Maintenant : file BFS, stop des qu'on a max_links URLs.
+        """
+        from collections import deque
+
+        found: Set[str] = set()
+        # (url, remaining_depth)
+        queue: deque = deque([(current_url, depth)])
+        seen_pages: Set[str] = set()
+
+        while queue and len(found) < max_links:
+            page_url, remaining = queue.popleft()
+            if remaining < 0 or page_url in seen_pages:
+                continue
+            seen_pages.add(page_url)
+            self.visited_urls.add(page_url)
+
+            try:
+                async with self.session.get(page_url, timeout=15) as response:
+                    if response.status != 200:
+                        continue
+                    content = await response.text()
+            except Exception as e:
+                logger.warning("Liens: echec fetch %s: %s", page_url, e)
+                continue
+
+            try:
+                soup = BeautifulSoup(content, "html.parser")
+            except Exception as e:
+                logger.warning("Liens: parse HTML %s: %s", page_url, e)
+                continue
+
+            for link in soup.find_all("a", href=True):
+                if len(found) >= max_links:
+                    break
+                href = link.get("href")
+                full_url = urljoin(page_url, href)
+                # Ignore ancres / mailto / javascript
+                parsed = urlparse(full_url)
+                if parsed.scheme not in ("http", "https"):
+                    continue
+                full_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+                if parsed.query:
+                    full_url = f"{full_url}?{parsed.query}"
+
+                if not self.is_internal_link(base_url, full_url):
+                    continue
+                if full_url == base_url or full_url.rstrip("/") == base_url.rstrip("/"):
+                    continue
+                # Ignore images / assets (pas des pages HTML)
+                path_l = (parsed.path or "").lower()
+                if path_l.endswith((
+                    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg",
+                    ".css", ".js", ".ico", ".pdf", ".zip", ".mp4", ".mp3",
+                    ".woff", ".woff2", ".ttf",
+                )):
+                    continue
+
+                if full_url not in found:
+                    found.add(full_url)
+                    if remaining > 1 and full_url not in seen_pages:
+                        queue.append((full_url, remaining - 1))
+
+        logger.info(
+            "Liens internes: %s trouves (max=%s, pages_visitees=%s, depth=%s) depuis %s",
+            len(found),
+            max_links,
+            len(seen_pages),
+            depth,
+            current_url,
+        )
+        return found
+
+    def is_internal_link(self, base_url: str, link_url: str) -> bool:
+        """Vérifie si un lien est interne au site (ignore www / casse)."""
+        try:
+            base_domain = urlparse(base_url).netloc.lower().removeprefix("www.")
+            link_domain = urlparse(link_url).netloc.lower().removeprefix("www.")
+            return base_domain == link_domain and bool(link_domain)
         except Exception:
             return False
 
-    async def get_internal_links(self, base_url: str, current_url: str, depth: int) -> Set[str]:
-        """Récupère les liens internes d'un site"""
-        if depth <= 0 or current_url in self.visited_urls:
-            return set()
-            
-        self.visited_urls.add(current_url)
-        internal_links = set()
-        
-        try:
-            async with self.session.get(current_url) as response:
-                if response.status != 200:
-                    return internal_links
-                    
-                content = await response.text()
-                soup = BeautifulSoup(content, 'html.parser')
-                
-                for link in soup.find_all('a', href=True):
-                    href = link.get('href')
-                    full_url = urljoin(current_url, href)
-                    
-                    # Vérification que c'est un lien interne
-                    if self.is_internal_link(base_url, full_url):
-                        internal_links.add(full_url)
-                        
-                        # Récursion pour les liens plus profonds
-                        if depth > 1:
-                            sub_links = await self.get_internal_links(base_url, full_url, depth - 1)
-                            internal_links.update(sub_links)
-                            
-        except Exception as e:
-            logger.error(f"Erreur lors de la récupération des liens internes de {current_url}: {e}")
-            
-        return internal_links
-
-    def is_internal_link(self, base_url: str, link_url: str) -> bool:
-        """Vérifie si un lien est interne au site"""
-        try:
-            base_domain = urlparse(base_url).netloc
-            link_domain = urlparse(link_url).netloc
-            return base_domain == link_domain
-        except:
-            return False
-
     def remove_duplicate_rss(self, rss_feeds: List[Dict]) -> List[Dict]:
-        """Supprime les flux RSS en double"""
+        """Supprime les flux RSS en double (http/https, slash, www...)."""
+        from utils import normalize_url
+
         seen_urls = set()
         unique_feeds = []
-        
+
         for feed in rss_feeds:
-            if feed['url'] not in seen_urls:
-                seen_urls.add(feed['url'])
-                unique_feeds.append(feed)
-                
-        return unique_feeds 
+            raw = (feed.get("url") or "").strip()
+            if not raw:
+                continue
+            key = normalize_url(raw) or raw
+            if key in seen_urls:
+                continue
+            seen_urls.add(key)
+            cleaned = dict(feed)
+            cleaned["url"] = key
+            unique_feeds.append(cleaned)
+
+        return unique_feeds

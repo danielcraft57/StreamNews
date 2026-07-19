@@ -8,9 +8,11 @@ from typing import List, Optional
 
 import feedparser
 
+from logging_config import get_logger
 from models import ArticleCandidate, IngestFeedResult
+from utils import normalize_identifier, normalize_url
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class IngestService:
@@ -28,7 +30,7 @@ class IngestService:
             return articles
 
         for entry in (parsed.entries or [])[: self.max_entries]:
-            link = entry.get("link") or entry.get("id") or ""
+            link = normalize_url(entry.get("link") or entry.get("id") or "")
             if not link:
                 continue
 
@@ -48,13 +50,13 @@ class IngestService:
 
             articles.append(
                 ArticleCandidate(
-                    feed_url=feed_url,
+                    feed_url=normalize_url(feed_url) or feed_url,
                     title=entry.get("title") or "Sans titre",
                     link=link,
                     summary=summary or None,
                     author=entry.get("author"),
                     published_at=published_at,
-                    guid=entry.get("id") or entry.get("guid"),
+                    guid=normalize_identifier(entry.get("id") or entry.get("guid")),
                 )
             )
         return articles

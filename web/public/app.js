@@ -2,6 +2,8 @@ class StreamNewsApp {
     constructor() {
         this.socket = null;
         this.currentAnalysis = null;
+        this.analysisMaxPages = 50;   // plafond formulaire
+        this.analysisTotalPages = null; // vrai total apres discovery
         this.init();
     }
 
@@ -15,9 +17,22 @@ class StreamNewsApp {
         const form = document.getElementById('analyzeForm');
         form.addEventListener('submit', (e) => this.handleAnalyzeSubmit(e));
 
+        const stopBtn = document.getElementById('stopAnalyzeBtn');
+        if (stopBtn) {
+            stopBtn.addEventListener('click', () => this.stopCurrentAnalysis());
+        }
+
         // Delegation : evite onclick= inline (bloque par CSP script-src-attr)
         const sitesList = document.getElementById('sitesList');
         sitesList.addEventListener('click', (e) => {
+            const deleteBtn = e.target.closest('[data-delete-site]');
+            if (deleteBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const siteId = Number(deleteBtn.dataset.deleteSite);
+                if (siteId) this.deleteSite(siteId);
+                return;
+            }
             const item = e.target.closest('.site-item[data-site-id]');
             if (!item) return;
             const siteId = Number(item.dataset.siteId);
@@ -71,55 +86,123 @@ class StreamNewsApp {
             case 'progress_update':
                 this.handleProgressUpdate(data);
                 break;
+            case 'articles_ingest_started':
+                this.handleArticlesIngestStarted(data);
+                break;
+            case 'analysis_cancelled':
+                this.handleAnalysisCancelled(data);
+                break;
         }
     }
 
+    sameSite(siteId) {
+        if (this.currentAnalysis == null || siteId == null) return false;
+        return Number(this.currentAnalysis) === Number(siteId);
+    }
+
     handleAnalysisStarted(data) {
-        this.currentAnalysis = data.site_id;
+        this.currentAnalysis = Number(data.site_id);
+        // plafond optionnel ; le vrai total arrive apres discovery (progress_update / page_analyzed)
+        const maxPages = Number(data.max_pages ?? data.total_pages);
+        if (Number.isFinite(maxPages) && maxPages > 0) {
+            this.analysisMaxPages = maxPages;
+        }
+        this.analysisTotalPages = null;
         this.updateStatus(`Analyse démarrée pour ${data.url}`, 'info');
         this.showLoading(true);
-        this.updateProgress(0, data.max_pages);
+        this.setLoadingText('Discovery des liens...');
     }
 
     handlePageAnalyzed(data) {
-        if (this.currentAnalysis === data.site_id) {
-            this.updateProgress(data.pages_analyzed, data.total_pages);
+        if (this.sameSite(data.site_id)) {
+            const current = data.pages_analyzed ?? data.current;
+            const total = data.total_pages ?? data.total ?? this.analysisTotalPages ?? this.analysisMaxPages;
+            if (data.total_pages != null || data.total != null) {
+                const t = Number(data.total_pages ?? data.total);
+                if (Number.isFinite(t) && t > 0) this.analysisTotalPages = t;
+            }
+            this.updateProgress(current, this.analysisTotalPages ?? total);
             this.addPageLog(`Page analysée: ${data.url}`, 'success');
+            const cur = Number(current);
+            const tot = Number(this.analysisTotalPages ?? total);
+            if (Number.isFinite(cur) && Number.isFinite(tot) && tot > 0 && cur >= tot) {
+                this.setLoadingText(`Crawl terminé (${cur} pages). Import des articles...`);
+            }
         }
     }
 
     handleRssFound(data) {
-        if (this.currentAnalysis === data.site_id) {
+        if (this.sameSite(data.site_id)) {
             this.addPageLog(`Flux RSS trouvé: ${data.rss_url}`, 'rss');
             this.addRssFeed(data);
         }
     }
 
+    handleArticlesIngestStarted(data) {
+        if (this.sameSite(data.site_id)) {
+            const n = data.feeds_count != null ? data.feeds_count : '?';
+            this.setLoadingText(`Import des articles (${n} flux)...`);
+            this.updateStatus(`Import des articles depuis ${n} flux...`, 'info');
+        }
+    }
+
     handleAnalysisCompleted(data) {
-        if (this.currentAnalysis === data.site_id) {
+        if (this.sameSite(data.site_id)) {
+            if (data.status === 'error') {
+                this.updateStatus(`Erreur: analyse incomplete`, 'error');
+                this.showLoading(false);
+                this.currentAnalysis = null;
+                this.loadSites();
+                return;
+            }
             const articlesBit = data.articles_count != null ? ` · ${data.articles_count} articles` : '';
             this.updateStatus(
                 `Analyse terminée ! ${data.rss_count} flux RSS trouvés${articlesBit}`,
                 'success'
             );
             this.showLoading(false);
-            this.updateProgress(data.total_pages, data.total_pages);
+            const pages = data.total_pages ?? this.analysisTotalPages;
+            if (pages != null) this.updateProgress(pages, pages);
             this.loadSites();
             this.currentAnalysis = null;
+            if (data.site_id) {
+                this.showSiteDetails(Number(data.site_id));
+            }
         }
     }
 
     handleAnalysisError(data) {
-        if (this.currentAnalysis === data.site_id) {
+        if (this.sameSite(data.site_id)) {
             this.updateStatus(`Erreur: ${data.error}`, 'error');
             this.showLoading(false);
             this.currentAnalysis = null;
+            this.loadSites();
+        }
+    }
+
+    handleAnalysisCancelled(data) {
+        if (this.currentAnalysis == null || this.sameSite(data.site_id)) {
+            this.updateStatus('Analyse arrêtée', 'info');
+            this.showLoading(false);
+            this.currentAnalysis = null;
+            this.loadSites();
         }
     }
 
     handleProgressUpdate(data) {
-        if (this.currentAnalysis === data.site_id) {
-            this.updateProgress(data.current, data.total);
+        if (this.sameSite(data.site_id)) {
+            const tot = data.total ?? data.total_pages;
+            if (tot != null && Number.isFinite(Number(tot)) && Number(tot) > 0) {
+                this.analysisTotalPages = Number(tot);
+            }
+            this.updateProgress(
+                data.current ?? data.pages_analyzed ?? 0,
+                this.analysisTotalPages
+            );
+            if (data.message) {
+                this.updateStatus(data.message, 'info');
+                this.setLoadingText(data.message);
+            }
         }
     }
 
@@ -128,17 +211,21 @@ class StreamNewsApp {
         
         const formData = new FormData(e.target);
         const url = formData.get('url');
-        const maxPages = parseInt(formData.get('maxPages'));
-        const depth = parseInt(formData.get('depth'));
+        const maxPages = parseInt(formData.get('maxPages'), 10);
+        const depth = parseInt(formData.get('depth'), 10);
         
         if (!url) {
             this.updateStatus('Veuillez saisir une URL', 'error');
             return;
         }
+
+        this.analysisMaxPages = Number.isFinite(maxPages) && maxPages > 0 ? maxPages : 50;
+        this.analysisTotalPages = null;
         
         try {
             this.updateStatus('Lancement de l\'analyse...', 'info');
             this.showLoading(true);
+            this.setLoadingText('Lancement...');
             this.clearResults();
             
             const response = await fetch('/api/analyze', {
@@ -148,7 +235,7 @@ class StreamNewsApp {
                 },
                 body: JSON.stringify({
                     url: url,
-                    max_pages: maxPages,
+                    max_pages: this.analysisMaxPages,
                     depth: depth
                 })
             });
@@ -157,7 +244,8 @@ class StreamNewsApp {
             
             if (response.ok) {
                 this.updateStatus(`Analyse lancée (ID: ${result.site_id})`, 'success');
-                this.currentAnalysis = result.site_id;
+                this.currentAnalysis = Number(result.site_id);
+                this._watchAnalysisFinish(Number(result.site_id));
             } else {
                 throw new Error(result.error || 'Erreur lors du lancement');
             }
@@ -165,6 +253,36 @@ class StreamNewsApp {
         } catch (error) {
             this.updateStatus(`Erreur: ${error.message}`, 'error');
             this.showLoading(false);
+            this.currentAnalysis = null;
+        }
+    }
+
+    async stopCurrentAnalysis() {
+        const siteId = this.currentAnalysis;
+        if (!siteId) {
+            this.showLoading(false);
+            return;
+        }
+
+        const stopBtn = document.getElementById('stopAnalyzeBtn');
+        if (stopBtn) stopBtn.disabled = true;
+
+        try {
+            this.updateStatus('Arrêt de l\'analyse...', 'info');
+            const res = await fetch(`/api/sites/${siteId}/stop`, { method: 'POST' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(data.error || data.detail || 'Impossible d\'arreter');
+            }
+            this.updateStatus('Analyse arrêtée', 'info');
+            this.showLoading(false);
+            this.currentAnalysis = null;
+            await this.loadSites();
+        } catch (err) {
+            console.error(err);
+            this.updateStatus(`Erreur: ${err.message}`, 'error');
+        } finally {
+            if (stopBtn) stopBtn.disabled = false;
         }
     }
 
@@ -194,7 +312,12 @@ class StreamNewsApp {
                     const feeds = this.parseRssFeeds(site.rss_feeds);
                     return `
                     <div class="site-item" data-site-id="${site.id}" role="button" tabindex="0">
-                        <h4>${site.url}</h4>
+                        <div class="site-item-header">
+                            <h4>${this.escapeHtml(site.url)}</h4>
+                            <button type="button" class="btn-delete" data-delete-site="${site.id}" title="Supprimer le site">
+                                Supprimer
+                            </button>
+                        </div>
                         <div class="site-info">
                             <span class="status ${site.status}">${this.getStatusText(site.status)}</span>
                             <span class="date">${new Date(site.created_at).toLocaleString()}</span>
@@ -230,10 +353,15 @@ class StreamNewsApp {
             resultsDiv.innerHTML = `
                 <h3>Détails de l'analyse</h3>
                 <div class="site-details">
-                    <p><strong>URL:</strong> ${site.url}</p>
+                    <p><strong>URL:</strong> ${this.escapeHtml(site.url)}</p>
                     <p><strong>Statut:</strong> <span class="status ${site.status}">${this.getStatusText(site.status)}</span></p>
                     <p><strong>Pages analysées:</strong> ${site.total_pages_analyzed || 0}</p>
                     <p><strong>Date:</strong> ${new Date(site.created_at).toLocaleString()}</p>
+                    <p style="margin-top:12px">
+                        <button type="button" class="btn btn-danger" data-delete-site-detail="${siteId}" style="width:auto;padding:10px 16px;font-size:14px;background:linear-gradient(135deg,#c0392b 0%,#922b21 100%)">
+                            Supprimer ce site
+                        </button>
+                    </p>
                 </div>
                 
                 ${feeds.length > 0 ? `
@@ -290,9 +418,39 @@ class StreamNewsApp {
                     }
                 });
             }
+
+            const deleteDetailBtn = resultsDiv.querySelector('[data-delete-site-detail]');
+            if (deleteDetailBtn) {
+                deleteDetailBtn.addEventListener('click', () => this.deleteSite(siteId));
+            }
             
         } catch (error) {
             console.error('Erreur lors du chargement des détails:', error);
+        }
+    }
+
+    async deleteSite(siteId) {
+        const ok = window.confirm(
+            `Supprimer le site #${siteId} ?\n\nCela efface aussi les pages crawlees, les feeds detectes et tous les articles importes.`
+        );
+        if (!ok) return;
+
+        try {
+            const res = await fetch(`/api/sites/${siteId}`, { method: 'DELETE' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || data.detail || 'Suppression impossible');
+
+            const d = data.deleted || {};
+            this.updateStatus(
+                `Site #${siteId} supprimé (${d.pages || 0} pages, ${d.feeds || 0} feeds, ${d.articles || 0} articles)`,
+                'success'
+            );
+            const resultsCard = document.getElementById('resultsCard');
+            if (resultsCard) resultsCard.style.display = 'none';
+            await this.loadSites();
+        } catch (err) {
+            console.error(err);
+            this.updateStatus(`Erreur: ${err.message}`, 'error');
         }
     }
 
@@ -328,21 +486,97 @@ class StreamNewsApp {
     showLoading(show) {
         const loadingDiv = document.getElementById('loading');
         const analyzeBtn = document.getElementById('analyzeBtn');
+        const stopBtn = document.getElementById('stopAnalyzeBtn');
         
         if (show) {
             loadingDiv.style.display = 'block';
             analyzeBtn.disabled = true;
+            if (stopBtn) stopBtn.disabled = false;
         } else {
             loadingDiv.style.display = 'none';
             analyzeBtn.disabled = false;
+            if (stopBtn) stopBtn.disabled = false;
         }
+    }
+
+    setLoadingText(text) {
+        const loadingDiv = document.getElementById('loading');
+        const progressText = loadingDiv && loadingDiv.querySelector('p');
+        if (progressText) progressText.textContent = text;
     }
 
     updateProgress(current, total) {
         const loadingDiv = document.getElementById('loading');
         const progressText = loadingDiv.querySelector('p');
-        const percentage = Math.round((current / total) * 100);
-        progressText.textContent = `Analyse en cours... ${current}/${total} pages (${percentage}%)`;
+        if (!progressText) return;
+
+        const cur = Number(current);
+        const tot = Number(total);
+        const safeCur = Number.isFinite(cur) && cur >= 0 ? cur : 0;
+        const safeTot = Number.isFinite(tot) && tot > 0 ? tot : null;
+
+        if (safeTot == null) {
+            progressText.textContent = safeCur > 0
+                ? `Analyse en cours... ${safeCur} page(s)`
+                : 'Discovery des liens...';
+            return;
+        }
+
+        const percentage = Math.min(100, Math.max(0, Math.round((safeCur / safeTot) * 100)));
+        if (safeCur >= safeTot) {
+            progressText.textContent = `Crawl terminé (${safeCur} page${safeCur > 1 ? 's' : ''}) — import des articles...`;
+        } else {
+            progressText.textContent = `Analyse en cours... ${safeCur}/${safeTot} pages (${percentage}%)`;
+        }
+    }
+
+    /**
+     * Filet de securite : si le WS rate analysis_completed, on poll le statut.
+     */
+    _watchAnalysisFinish(siteId) {
+        const started = Date.now();
+        const maxMs = 15 * 60 * 1000;
+        const tick = async () => {
+            if (!this.sameSite(siteId)) return;
+            if (Date.now() - started > maxMs) {
+                this.updateStatus('Analyse trop longue — verifie les logs worker', 'error');
+                this.showLoading(false);
+                this.currentAnalysis = null;
+                return;
+            }
+            try {
+                const res = await fetch(`/api/sites/${siteId}`);
+                if (res.ok) {
+                    const site = await res.json();
+                    const st = site.status;
+                    if (st === 'completed' || st === 'error' || st === 'cancelled') {
+                        if (st === 'completed') {
+                            const feeds = this.parseRssFeeds(site.rss_feeds);
+                            this.updateStatus(
+                                `Analyse terminée ! ${feeds.length} flux RSS`,
+                                'success'
+                            );
+                            this.showSiteDetails(siteId);
+                        } else if (st === 'error') {
+                            this.updateStatus('Analyse en erreur', 'error');
+                        } else {
+                            this.updateStatus('Analyse arrêtée', 'info');
+                        }
+                        this.showLoading(false);
+                        this.currentAnalysis = null;
+                        await this.loadSites();
+                        return;
+                    }
+                    if (st === 'analyzing' || st === 'pending') {
+                        // encore en cours (souvent phase ingest apres 100% crawl)
+                    }
+                }
+            } catch (_) {
+                /* ignore */
+            }
+            setTimeout(tick, 4000);
+        };
+        setTimeout(tick, 8000);
     }
 
     addPageLog(message, type) {
@@ -399,7 +633,9 @@ class StreamNewsApp {
             'pending': 'En attente',
             'analyzing': 'En cours',
             'completed': 'Terminé',
-            'error': 'Erreur'
+            'error': 'Erreur',
+            'cancelled': 'Arrêté',
+            'cancelling': 'Arrêt...'
         };
         return statusMap[status] || status;
     }

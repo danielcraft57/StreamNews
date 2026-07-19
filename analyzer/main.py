@@ -1,11 +1,18 @@
 import os
-import asyncio
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
+import requests
+
+from logging_config import setup_logging
+
+# Avant tout import Celery (sinon worker.log ecrase analyzer.log)
+logger = setup_logging(service="analyzer")
+
 from database import Database
 from rss_analyzer import RSSAnalyzer
 from celery_worker import analyze_site_task
+from celery_app import celery_app
 
 app = FastAPI(title="StreamNews Analyzer", version="1.0.0")
 
@@ -27,10 +34,12 @@ class AnalysisResult(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
+    logger.info("Startup analyzer: init DB")
     await db.init_db()
+    logger.info("Startup analyzer: DB OK")
 
 @app.post("/analyze", response_model=AnalysisResult)
-async def analyze_site(request: SiteAnalysisRequest, background_tasks: BackgroundTasks):
+async def analyze_site(request: SiteAnalysisRequest):
     """Lance l'analyse d'un site web pour détecter les flux RSS"""
     try:
         # Validation de l'URL
@@ -39,9 +48,19 @@ async def analyze_site(request: SiteAnalysisRequest, background_tasks: Backgroun
         
         # Création de l'entrée en base
         site_id = await db.create_site_analysis(request.url, "pending")
-        
-        # Lancement de l'analyse en arrière-plan
-        background_tasks.add_task(analyze_site_task.delay, site_id, request.url, request.max_pages, request.depth)
+        logger.info(
+            "Analyze queued site_id=%s url=%s max_pages=%s depth=%s",
+            site_id,
+            request.url,
+            request.max_pages,
+            request.depth,
+        )
+
+        async_result = analyze_site_task.delay(
+            site_id, request.url, request.max_pages, request.depth
+        )
+        await db.set_celery_task_id(site_id, async_result.id)
+        logger.info("Celery task_id=%s site_id=%s", async_result.id, site_id)
         
         return AnalysisResult(
             site_id=site_id,
@@ -52,6 +71,7 @@ async def analyze_site(request: SiteAnalysisRequest, background_tasks: Backgroun
         )
     
     except Exception as e:
+        logger.exception("analyze failed url=%s", request.url)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/sites")
@@ -71,6 +91,64 @@ async def get_site(site_id: int):
         if not site:
             raise HTTPException(status_code=404, detail="Site non trouvé")
         return site
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/sites/{site_id}")
+async def delete_site(site_id: int):
+    """Supprime un site + pages + articles (feeds JSON inclus)."""
+    try:
+        result = await db.delete_site(site_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Site non trouvé")
+        return {"status": "deleted", **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/sites/{site_id}/stop")
+async def stop_site_analysis(site_id: int):
+    """Arrete une analyse en cours (revoke Celery + statut cancelled)."""
+    try:
+        site = await db.get_site(site_id)
+        if not site:
+            raise HTTPException(status_code=404, detail="Site non trouvé")
+
+        if site.get("status") in ("completed", "error", "cancelled"):
+            return {
+                "status": site.get("status"),
+                "site_id": site_id,
+                "message": "Rien a arreter",
+            }
+
+        await db.update_site_status(site_id, "cancelled")
+        logger.info("Stop analysis site_id=%s task_id=%s", site_id, site.get("celery_task_id"))
+
+        task_id = site.get("celery_task_id")
+        if task_id:
+            try:
+                celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
+            except Exception as exc:
+                logger.warning("revoke failed site_id=%s: %s", site_id, exc)
+
+        try:
+            web_url = os.getenv("WEB_URL", "http://localhost:3000")
+            requests.post(
+                f"{web_url}/api/websocket",
+                json={
+                    "type": "analysis_cancelled",
+                    "site_id": site_id,
+                    "url": site.get("url"),
+                },
+                timeout=5,
+            )
+        except Exception:
+            pass
+
+        return {"status": "cancelled", "site_id": site_id}
     except HTTPException:
         raise
     except Exception as e:

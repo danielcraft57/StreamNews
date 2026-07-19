@@ -76,3 +76,5 @@ Voir `.env.example`. Sur homelab, `.env` hors git dans `/opt/streamnews/.env`.
 2. Ne pas mettre de worker sur node7 (reserve UI/API)
 3. Ne pas committer `.env`
 4. Pi 2 : `CELERY_CONCURRENCY=1`
+5. Logs : `tail -f /opt/streamnews/logs/worker.log` (ou `analyzer.log` / `web.log`)
+6. Si le worker crash en boucle, regarder `logs/errors.log` (souvent import casse apres un mauvais deploy)

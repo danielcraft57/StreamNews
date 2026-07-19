@@ -19,6 +19,13 @@ if [[ -f .venv/bin/activate ]]; then
   source .venv/bin/activate
 fi
 
+RESET=0
+if [[ "${1:-}" == "--reset" ]]; then
+  RESET=1
+  echo "ATTENTION: recreate complete du schema (DROP tables)."
+fi
+
 cd analyzer
-python -c "from database import Database; import asyncio; asyncio.run(Database().init_db())"
+STREAMNEWS_RESET_DB="$RESET" python -c \
+  "from database import Database; import asyncio; asyncio.run(Database().init_db(reset=$RESET))"
 echo "Base initialisee."

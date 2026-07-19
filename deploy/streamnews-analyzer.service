@@ -9,6 +9,8 @@ Group=streamnews
 WorkingDirectory=/opt/streamnews/analyzer
 EnvironmentFile=/opt/streamnews/.env
 Environment=PATH=/opt/streamnews/.venv/bin:/usr/bin
+Environment=LOG_DIR=/opt/streamnews/logs
+Environment=LOG_LEVEL=INFO
 ExecStart=/opt/streamnews/.venv/bin/python main.py
 Restart=on-failure
 RestartSec=5

@@ -6,6 +6,7 @@ const path = require('path');
 const axios = require('axios');
 const WebSocket = require('ws');
 const http = require('http');
+const { logger } = require('./logger');
 
 const app = express();
 const server = http.createServer(app);
@@ -69,7 +70,7 @@ app.post('/api/analyze', async (req, res) => {
         });
         res.json(response.data);
     } catch (error) {
-        console.error('Erreur lors de l\'analyse:', error.message);
+        logger.error('Erreur lors de l\'analyse:', error.message);
         res.status(500).json({ 
             error: 'Erreur lors de l\'analyse du site',
             details: error.message 
@@ -84,7 +85,7 @@ app.get('/api/sites', async (req, res) => {
         });
         res.json(response.data);
     } catch (error) {
-        console.error('Erreur lors de la récupération des sites:', error.message);
+        logger.error('Erreur lors de la récupération des sites:', error.message);
         res.status(500).json({ 
             error: 'Erreur lors de la récupération des sites',
             details: error.message 
@@ -99,10 +100,42 @@ app.get('/api/sites/:id', async (req, res) => {
         });
         res.json(response.data);
     } catch (error) {
-        console.error('Erreur lors de la récupération du site:', error.message);
+        logger.error('Erreur lors de la récupération du site:', error.message);
         res.status(500).json({ 
             error: 'Erreur lors de la récupération du site',
             details: error.message 
+        });
+    }
+});
+
+app.delete('/api/sites/:id', async (req, res) => {
+    try {
+        const response = await axios.delete(`${ANALYZER_URL}/sites/${req.params.id}`, {
+            timeout: 15000
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur lors de la suppression du site:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors de la suppression du site',
+            details: error.response?.data?.detail || error.message
+        });
+    }
+});
+
+app.post('/api/sites/:id/stop', async (req, res) => {
+    try {
+        const response = await axios.post(`${ANALYZER_URL}/sites/${req.params.id}/stop`, {}, {
+            timeout: 15000
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur lors de l\'arret de l\'analyse:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors de l\'arret de l\'analyse',
+            details: error.response?.data?.detail || error.message
         });
     }
 });
@@ -114,7 +147,7 @@ app.get('/api/sites/:id/pages', async (req, res) => {
         });
         res.json(response.data);
     } catch (error) {
-        console.error('Erreur lors de la récupération des pages:', error.message);
+        logger.error('Erreur lors de la récupération des pages:', error.message);
         const status = error.response?.status || 500;
         res.status(status).json({
             error: 'Erreur lors de la récupération des pages',
@@ -131,7 +164,7 @@ app.get('/api/sites/:id/articles', async (req, res) => {
         });
         res.json(response.data);
     } catch (error) {
-        console.error('Erreur lors de la récupération des articles:', error.message);
+        logger.error('Erreur lors de la récupération des articles:', error.message);
         const status = error.response?.status || 500;
         res.status(status).json({
             error: 'Erreur lors de la récupération des articles',
@@ -149,7 +182,7 @@ app.post('/api/sites/:id/ingest-articles', async (req, res) => {
         );
         res.json(response.data);
     } catch (error) {
-        console.error('Erreur lors de l\'ingestion des articles:', error.message);
+        logger.error('Erreur lors de l\'ingestion des articles:', error.message);
         const status = error.response?.status || 500;
         res.status(status).json({
             error: 'Erreur lors de l\'ingestion des articles',
@@ -162,14 +195,14 @@ app.post('/api/sites/:id/ingest-articles', async (req, res) => {
 app.post('/api/websocket', (req, res) => {
     try {
         const message = req.body;
-        console.log('Message reçu du service d\'analyse:', message);
+        logger.info('Message reçu du service d\'analyse:', message);
         
         // Broadcast du message à tous les clients WebSocket
         broadcastMessage(message);
         
         res.json({ status: 'ok' });
     } catch (error) {
-        console.error('Erreur lors du traitement du message WebSocket:', error);
+        logger.error('Erreur lors du traitement du message WebSocket:', error);
         res.status(500).json({ error: 'Erreur interne' });
     }
 });
@@ -186,7 +219,7 @@ app.use((req, res) => {
 
 // Gestionnaire d'erreurs global
 app.use((error, req, res, next) => {
-    console.error('Erreur serveur:', error);
+    logger.error('Erreur serveur:', error);
     res.status(500).json({ 
         error: 'Erreur interne du serveur',
         details: process.env.NODE_ENV === 'development' ? error.message : 'Erreur interne'
@@ -195,16 +228,16 @@ app.use((error, req, res, next) => {
 
 // Gestion des connexions WebSocket
 wss.on('connection', (ws) => {
-    console.log('Nouvelle connexion WebSocket');
+    logger.info('Nouvelle connexion WebSocket');
     clients.add(ws);
     
     ws.on('close', () => {
-        console.log('Connexion WebSocket fermée');
+        logger.info('Connexion WebSocket fermée');
         clients.delete(ws);
     });
     
     ws.on('error', (error) => {
-        console.error('Erreur WebSocket:', error);
+        logger.error('Erreur WebSocket:', error);
         clients.delete(ws);
     });
 });
@@ -226,9 +259,9 @@ module.exports = { app, server, broadcastMessage, ANALYZER_URL };
 
 if (require.main === module) {
     server.listen(PORT, () => {
-        console.log(`Serveur web démarré sur le port ${PORT}`);
-        console.log(`Service d'analyse: ${ANALYZER_URL}`);
-        console.log('WebSocket activé');
+        logger.info(`Serveur web démarré sur le port ${PORT}`);
+        logger.info(`Service d'analyse: ${ANALYZER_URL}`);
+        logger.info('WebSocket activé');
     });
 }
  

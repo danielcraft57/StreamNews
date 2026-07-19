@@ -1,0 +1,4 @@
+"""
+Garde le dossier logs/ dans git (les .log restent ignores).
+Sur prod : LOG_DIR=/opt/streamnews/logs (systemd).
+"""

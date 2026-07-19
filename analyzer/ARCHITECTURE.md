@@ -10,6 +10,7 @@
 | **Pipeline + Fan-out/Fan-in** | `tasks/` | crawl -> group(ingest) -> finalize (Celery chord) |
 | **Queues** | `crawl`, `ingest`, `default` | Specialisation workers |
 | **Bounded concurrency** | `CRAWL_CONCURRENCY` | Semaphore asyncio sur pages (defaut 3) |
+| **Logging** | `logging_config.py` + `logs/` | Fichiers rotatifs `analyzer.log`, `worker.log`, `web.log`, `errors.log` |
 
 ## Flux
 
@@ -28,6 +29,21 @@ POST /analyze
 - Pages crawllees en parallele sur un meme Pi (sans exploser la RAM)
 - Chaque flux RSS ingere sur un worker different si plusieurs Pi
 - UI notifiee une fois le fan-in termine
+
+## Logs
+
+Dossier `logs/` a la racine du repo (ou `LOG_DIR`) :
+
+| Fichier | Source |
+|---------|--------|
+| `analyzer.log` | FastAPI (node app) |
+| `worker.log` | Celery (nodes worker) |
+| `web.log` | Express |
+| `errors.log` | WARNING+ (tous) |
+
+```bash
+tail -f /opt/streamnews/logs/worker.log
+```
 
 ## Lancer un worker
 

@@ -8,6 +8,8 @@ User=streamnews
 Group=streamnews
 WorkingDirectory=/opt/streamnews/web
 EnvironmentFile=/opt/streamnews/.env
+Environment=LOG_DIR=/opt/streamnews/logs
+Environment=LOG_LEVEL=info
 ExecStart=/usr/bin/node server.js
 Restart=on-failure
 RestartSec=5

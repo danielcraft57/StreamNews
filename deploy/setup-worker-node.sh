@@ -34,6 +34,8 @@ if ! id "$APP_USER" &>/dev/null; then
   useradd --system --home-dir "$APP_DIR" --shell /bin/bash "$APP_USER"
 fi
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+mkdir -p "$APP_DIR/logs"
+chown "$APP_USER:$APP_USER" "$APP_DIR/logs"
 
 cat > "$APP_DIR/.env" <<EOF
 DATABASE_URL=postgresql://streamnews:${PG_PASSWORD}@${DATA_HOST}:5432/streamnews

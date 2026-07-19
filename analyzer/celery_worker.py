@@ -5,8 +5,14 @@ Point d'entree Celery (compat) :
 
 Enregistre le pipeline (crawl -> fan-out ingest -> finalize).
 """
-from celery_app import celery_app
-import tasks  # noqa: F401  register tasks
+from logging_config import is_configured, setup_logging
+
+# Si importe depuis main.py (analyzer), ne pas ecraser le logger analyzer.
+if not is_configured():
+    setup_logging(service="worker")
+
+from celery_app import celery_app  # noqa: E402
+import tasks  # noqa: F401, E402  register tasks
 
 from tasks import (  # noqa: E402
     analyze_site_task,

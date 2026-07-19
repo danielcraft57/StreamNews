@@ -37,12 +37,20 @@ class Database:
                 data[key] = data[key].isoformat()
         return data
 
-    async def init_db(self):
-        """Initialise la connexion à la base de données et crée les tables"""
+    async def init_db(self, reset: bool = False):
+        """Initialise la connexion et le schema (pas de migrations).
+
+        reset=True ou STREAMNEWS_RESET_DB=1 : DROP + recreate (pages/articles CASCADE).
+        """
         self.pool = await asyncpg.create_pool(self.database_url)
-        
+        do_reset = reset or os.getenv("STREAMNEWS_RESET_DB", "").strip() in ("1", "true", "yes")
+
         async with self.pool.acquire() as conn:
-            # Création de la table des sites
+            if do_reset:
+                await conn.execute("DROP TABLE IF EXISTS articles CASCADE")
+                await conn.execute("DROP TABLE IF EXISTS pages CASCADE")
+                await conn.execute("DROP TABLE IF EXISTS sites CASCADE")
+
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS sites (
                     id SERIAL PRIMARY KEY,
@@ -51,15 +59,19 @@ class Database:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     total_pages_analyzed INTEGER DEFAULT 0,
-                    rss_feeds JSONB DEFAULT '[]'::jsonb
+                    rss_feeds JSONB DEFAULT '[]'::jsonb,
+                    celery_task_id VARCHAR(255)
                 )
             """)
-            
-            # Création de la table des pages analysées
+            await conn.execute("""
+                ALTER TABLE sites
+                ADD COLUMN IF NOT EXISTS celery_task_id VARCHAR(255)
+            """)
+
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS pages (
                     id SERIAL PRIMARY KEY,
-                    site_id INTEGER REFERENCES sites(id),
+                    site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
                     url VARCHAR(1000) NOT NULL,
                     title VARCHAR(500),
                     rss_feeds JSONB DEFAULT '[]'::jsonb,
@@ -67,11 +79,10 @@ class Database:
                 )
             """)
 
-            # Articles extraits des flux RSS
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS articles (
                     id SERIAL PRIMARY KEY,
-                    site_id INTEGER REFERENCES sites(id) ON DELETE CASCADE,
+                    site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
                     feed_url VARCHAR(1000) NOT NULL,
                     title VARCHAR(1000),
                     link VARCHAR(2000) NOT NULL,
@@ -79,14 +90,47 @@ class Database:
                     author VARCHAR(500),
                     published_at TIMESTAMP,
                     guid VARCHAR(2000),
+                    dedupe_key VARCHAR(2100) NOT NULL DEFAULT '',
                     fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE (site_id, link)
                 )
             """)
             await conn.execute("""
+                ALTER TABLE articles
+                ADD COLUMN IF NOT EXISTS dedupe_key VARCHAR(2100) NOT NULL DEFAULT ''
+            """)
+            await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_articles_site_published
                 ON articles (site_id, published_at DESC NULLS LAST)
             """)
+
+            # Installs existantes : forcer ON DELETE CASCADE sans migration
+            await conn.execute("""
+                DO $$
+                BEGIN
+                    ALTER TABLE pages DROP CONSTRAINT IF EXISTS pages_site_id_fkey;
+                    ALTER TABLE pages
+                        ADD CONSTRAINT pages_site_id_fkey
+                        FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE;
+
+                    ALTER TABLE articles DROP CONSTRAINT IF EXISTS articles_site_id_fkey;
+                    ALTER TABLE articles
+                        ADD CONSTRAINT articles_site_id_fkey
+                        FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE;
+                EXCEPTION WHEN others THEN
+                    NULL;
+                END $$;
+            """)
+
+        # Backfill dedupe une seule fois par process (evite de rescanner a chaque tache)
+        if not getattr(self, "_dedupe_ensured", False):
+            deleted = await self.ensure_article_dedupe()
+            self._dedupe_ensured = True
+            if deleted:
+                import logging
+                logging.getLogger(__name__).info(
+                    "Dedupe articles: %s doublons supprimes", deleted
+                )
 
     async def create_site_analysis(self, url: str, status: str = "pending") -> int:
         """Crée une nouvelle analyse de site"""
@@ -96,6 +140,21 @@ class Database:
                 url, status
             )
             return row['id']
+
+    async def set_celery_task_id(self, site_id: int, task_id: Optional[str]) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE sites SET celery_task_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+                task_id,
+                site_id,
+            )
+
+    async def is_cancel_requested(self, site_id: int) -> bool:
+        async with self.pool.acquire() as conn:
+            status = await conn.fetchval(
+                "SELECT status FROM sites WHERE id = $1", site_id
+            )
+            return status in ("cancelled", "cancelling")
 
     async def update_site_status(self, site_id: int, status: str, rss_feeds: List[Dict] = None, total_pages: int = 0):
         """Met à jour le statut d'un site"""
@@ -129,6 +188,32 @@ class Database:
             if row:
                 return self._row_to_dict(row)
             return None
+
+    async def delete_site(self, site_id: int) -> Optional[Dict]:
+        """Supprime un site ; pages + articles partent via ON DELETE CASCADE.
+        Les feeds (JSONB sur sites/pages) disparaissent avec."""
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                site = await conn.fetchrow("SELECT * FROM sites WHERE id = $1", site_id)
+                if not site:
+                    return None
+                articles = await conn.fetchval(
+                    "SELECT COUNT(*) FROM articles WHERE site_id = $1", site_id
+                )
+                pages = await conn.fetchval(
+                    "SELECT COUNT(*) FROM pages WHERE site_id = $1", site_id
+                )
+                data = self._row_to_dict(site)
+                await conn.execute("DELETE FROM sites WHERE id = $1", site_id)
+                return {
+                    "site": data,
+                    "deleted": {
+                        "site_id": site_id,
+                        "pages": int(pages or 0),
+                        "articles": int(articles or 0),
+                        "feeds": len(data.get("rss_feeds") or []),
+                    },
+                }
 
     async def get_all_sites(self) -> List[Dict]:
         """Récupère tous les sites analysés"""
@@ -171,17 +256,26 @@ class Database:
         published_at=None,
         guid: str = None,
     ) -> bool:
-        """Insert ou ignore un article (dedup sur site_id+link). Retourne True si cree."""
-        if not link:
+        """Insert/update un article. Dedup sur dedupe_key (guid ou lien normalise)."""
+        from utils import article_dedupe_key, normalize_identifier, normalize_url
+
+        link_n = normalize_url(link)
+        if not link_n:
             return False
+        guid_n = normalize_identifier(guid)
+        key = article_dedupe_key(link_n, guid_n)
+        feed_n = normalize_url(feed_url) or (feed_url or "")[:1000]
+
         async with self.pool.acquire() as conn:
             await conn.execute(
                 """
                 INSERT INTO articles
-                    (site_id, feed_url, title, link, summary, author, published_at, guid)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                ON CONFLICT (site_id, link) DO UPDATE SET
+                    (site_id, feed_url, title, link, summary, author, published_at, guid, dedupe_key)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                ON CONFLICT (site_id, dedupe_key) DO UPDATE SET
+                    feed_url = EXCLUDED.feed_url,
                     title = EXCLUDED.title,
+                    link = EXCLUDED.link,
                     summary = EXCLUDED.summary,
                     author = EXCLUDED.author,
                     published_at = COALESCE(EXCLUDED.published_at, articles.published_at),
@@ -189,15 +283,79 @@ class Database:
                     fetched_at = CURRENT_TIMESTAMP
                 """,
                 site_id,
-                feed_url[:1000],
+                feed_n[:1000],
                 (title or "")[:1000] or None,
-                link[:2000],
+                link_n[:2000],
                 summary,
                 (author or "")[:500] or None,
                 published_at,
-                (guid or "")[:2000] or None,
+                (guid_n or "")[:2000] or None,
+                key[:2100],
             )
             return True
+
+    async def ensure_article_dedupe(self) -> int:
+        """Backfill dedupe_key, purge doublons http/https, ajoute UNIQUE."""
+        from utils import article_dedupe_key, normalize_identifier, normalize_url
+        from collections import defaultdict
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, site_id, link, guid, feed_url FROM articles ORDER BY id"
+            )
+            groups = defaultdict(list)
+            for row in rows:
+                link_n = normalize_url(row["link"]) or row["link"]
+                guid_n = normalize_identifier(row["guid"])
+                key = article_dedupe_key(link_n, guid_n)
+                groups[(row["site_id"], key)].append(
+                    {
+                        "id": row["id"],
+                        "link_n": link_n,
+                        "guid_n": guid_n,
+                        "feed_n": normalize_url(row["feed_url"]) or row["feed_url"],
+                        "key": key,
+                    }
+                )
+
+            deleted = 0
+            for (_site_id, _key), items in groups.items():
+                keep = items[0]
+                for dup in items[1:]:
+                    await conn.execute("DELETE FROM articles WHERE id = $1", dup["id"])
+                    deleted += 1
+                await conn.execute(
+                    """
+                    UPDATE articles
+                    SET dedupe_key = $1,
+                        link = $2,
+                        guid = COALESCE($3, guid),
+                        feed_url = $4
+                    WHERE id = $5
+                    """,
+                    keep["key"][:2100],
+                    keep["link_n"][:2000],
+                    keep["guid_n"],
+                    (keep["feed_n"] or "")[:1000],
+                    keep["id"],
+                )
+
+            await conn.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'articles_site_id_dedupe_key_key'
+                    ) THEN
+                        ALTER TABLE articles
+                            ADD CONSTRAINT articles_site_id_dedupe_key_key
+                            UNIQUE (site_id, dedupe_key);
+                    END IF;
+                EXCEPTION WHEN others THEN
+                    NULL;
+                END $$;
+            """)
+            return deleted
 
     async def ingest_rss_articles(self, site_id: int, feeds: List[Dict], max_per_feed: int = 50) -> int:
         """Parse chaque flux RSS et stocke les articles. Retourne le nombre upserted."""
@@ -206,6 +364,9 @@ class Database:
         from time import mktime
 
         feeds = feeds or []
+        from utils import collapse_equivalent_feeds
+
+        feeds = collapse_equivalent_feeds(feeds)
         seen_feed_urls = set()
         count = 0
 
@@ -247,7 +408,8 @@ class Database:
                     published_at=published_at,
                     guid=entry.get("id") or entry.get("guid"),
                 )
-                count += 1
+                if created:
+                    count += 1
 
         return count
 

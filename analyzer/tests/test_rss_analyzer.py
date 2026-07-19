@@ -40,11 +40,13 @@ def test_remove_duplicate_rss():
     feeds = [
         {"url": "https://example.com/rss", "title": "A"},
         {"url": "https://example.com/rss", "title": "B"},
+        {"url": "http://example.com/rss/", "title": "B2"},
         {"url": "https://example.com/atom", "title": "C"},
     ]
     unique = analyzer.remove_duplicate_rss(feeds)
     assert len(unique) == 2
     assert unique[0]["title"] == "A"
+    assert unique[0]["url"] == "https://example.com/rss"
     assert unique[1]["url"] == "https://example.com/atom"
 
 
