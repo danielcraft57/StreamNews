@@ -23,6 +23,8 @@ celery_app.conf.update(
     task_routes={
         "streamnews.crawl_site": {"queue": "crawl"},
         "streamnews.ingest_feed": {"queue": "ingest"},
+        "streamnews.enrich_article": {"queue": "ingest"},
+        "streamnews.enrich_site_articles": {"queue": "ingest"},
         "streamnews.finalize_analysis": {"queue": "default"},
         # compat anciens noms
         "celery_worker.analyze_site_task": {"queue": "crawl"},

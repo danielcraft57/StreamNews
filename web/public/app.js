@@ -4,6 +4,9 @@ class StreamNewsApp {
         this.currentAnalysis = null;
         this.analysisMaxPages = 50;   // plafond formulaire
         this.analysisTotalPages = null; // vrai total apres discovery
+        this.selectedArticleId = null;
+        this.viewingSiteId = null;
+        this._articlePollTimer = null;
         this.init();
     }
 
@@ -88,6 +91,12 @@ class StreamNewsApp {
                 break;
             case 'articles_ingest_started':
                 this.handleArticlesIngestStarted(data);
+                break;
+            case 'site_meta':
+                this.loadSites();
+                break;
+            case 'article_enriched':
+                this.handleArticleEnriched(data);
                 break;
             case 'analysis_cancelled':
                 this.handleAnalysisCancelled(data);
@@ -310,14 +319,28 @@ class StreamNewsApp {
             if (data.sites && data.sites.length > 0) {
                 sitesList.innerHTML = data.sites.map(site => {
                     const feeds = this.parseRssFeeds(site.rss_feeds);
+                    const title = site.site_title || site.url;
+                    const favicon = site.favicon_url
+                        ? `<img class="site-favicon" src="${this.escapeAttr(site.favicon_url)}" alt="" width="20" height="20" loading="lazy" onerror="this.style.display='none'">`
+                        : `<span class="site-favicon site-favicon-fallback" aria-hidden="true"></span>`;
+                    const desc = site.meta_description
+                        ? `<div class="site-desc">${this.escapeHtml(site.meta_description.slice(0, 140))}${site.meta_description.length > 140 ? '…' : ''}</div>`
+                        : '';
                     return `
                     <div class="site-item" data-site-id="${site.id}" role="button" tabindex="0">
                         <div class="site-item-header">
-                            <h4>${this.escapeHtml(site.url)}</h4>
+                            <div class="site-title-row">
+                                ${favicon}
+                                <div class="site-title-block">
+                                    <h4>${this.escapeHtml(title)}</h4>
+                                    <div class="site-url">${this.escapeHtml(site.url)}</div>
+                                </div>
+                            </div>
                             <button type="button" class="btn-delete" data-delete-site="${site.id}" title="Supprimer le site">
                                 Supprimer
                             </button>
                         </div>
+                        ${desc}
                         <div class="site-info">
                             <span class="status ${site.status}">${this.getStatusText(site.status)}</span>
                             <span class="date">${new Date(site.created_at).toLocaleString()}</span>
@@ -337,6 +360,10 @@ class StreamNewsApp {
 
     async showSiteDetails(siteId) {
         try {
+            this.viewingSiteId = siteId;
+            this.selectedArticleId = null;
+            this._clearArticlePoll();
+
             const [siteRes, articlesRes] = await Promise.all([
                 fetch(`/api/sites/${siteId}`),
                 fetch(`/api/sites/${siteId}/articles?limit=100`)
@@ -350,10 +377,22 @@ class StreamNewsApp {
             this.showResults();
             
             const resultsDiv = document.getElementById('results');
+            const extra = site.meta_extra && typeof site.meta_extra === 'object' ? site.meta_extra : {};
+            const favicon = site.favicon_url
+                ? `<img class="site-favicon site-favicon-lg" src="${this.escapeAttr(site.favicon_url)}" alt="" width="32" height="32" onerror="this.style.display='none'">`
+                : '';
             resultsDiv.innerHTML = `
                 <h3>Détails de l'analyse</h3>
                 <div class="site-details">
-                    <p><strong>URL:</strong> ${this.escapeHtml(site.url)}</p>
+                    <div class="site-title-row" style="margin-bottom:12px">
+                        ${favicon}
+                        <div>
+                            <h4 style="margin:0 0 4px">${this.escapeHtml(site.site_title || site.url)}</h4>
+                            <p style="margin:0"><a href="${this.escapeAttr(site.url)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(site.url)}</a></p>
+                        </div>
+                    </div>
+                    ${site.meta_description ? `<p>${this.escapeHtml(site.meta_description)}</p>` : ''}
+                    ${extra.og_image ? `<p><img src="${this.escapeAttr(extra.og_image)}" alt="" style="max-width:100%;max-height:160px;border-radius:8px" onerror="this.style.display='none'"></p>` : ''}
                     <p><strong>Statut:</strong> <span class="status ${site.status}">${this.getStatusText(site.status)}</span></p>
                     <p><strong>Pages analysées:</strong> ${site.total_pages_analyzed || 0}</p>
                     <p><strong>Date:</strong> ${new Date(site.created_at).toLocaleString()}</p>
@@ -375,27 +414,27 @@ class StreamNewsApp {
                             </div>
                         `).join('')}
                     </div>
-                    <p style="margin-top:12px">
+                    <p style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
                         <button type="button" class="btn" data-ingest-site="${siteId}" style="width:auto;padding:10px 16px;font-size:14px">
                             Recharger les articles des flux
                         </button>
+                        ${articles.length > 0 ? `
+                            <button type="button" class="btn" data-enrich-site="${siteId}" style="width:auto;padding:10px 16px;font-size:14px;background:linear-gradient(135deg,#2c7a7b 0%,#285e61 100%)">
+                                Enrichir les articles
+                            </button>
+                        ` : ''}
                     </p>
                 ` : '<p>Aucun flux RSS trouvé</p>'}
 
                 <h4 style="margin-top:24px">Articles (${articles.length})</h4>
                 ${articles.length > 0 ? `
-                    <div class="rss-feeds" data-testid="articles-list">
-                        ${articles.map(article => `
-                            <div class="rss-feed">
-                                <h4>${this.escapeHtml(article.title || 'Sans titre')}</h4>
-                                <p><a href="${this.escapeAttr(article.link)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(article.link)}</a></p>
-                                ${article.summary ? `<p>${this.escapeHtml(this.stripHtml(article.summary).slice(0, 280))}${this.stripHtml(article.summary).length > 280 ? '…' : ''}</p>` : ''}
-                                <small>
-                                    ${article.published_at ? this.escapeHtml(new Date(article.published_at).toLocaleString()) : 'Date inconnue'}
-                                    ${article.feed_url ? ` | Feed: ${this.escapeHtml(article.feed_url)}` : ''}
-                                </small>
-                            </div>
-                        `).join('')}
+                    <div class="articles-layout" data-testid="articles-layout">
+                        <div class="articles-list-pane rss-feeds" data-testid="articles-list">
+                            ${articles.map(article => this.renderArticleListItem(article)).join('')}
+                        </div>
+                        <div class="article-reader empty" id="articleReader" data-testid="article-reader">
+                            Clique un article pour lire le contenu
+                        </div>
                     </div>
                 ` : '<p>Aucun article importé pour le moment. Lance une analyse ou clique « Recharger les articles ».</p>'}
             `;
@@ -419,13 +458,226 @@ class StreamNewsApp {
                 });
             }
 
+            const enrichBtn = resultsDiv.querySelector('[data-enrich-site]');
+            if (enrichBtn) {
+                enrichBtn.addEventListener('click', async () => {
+                    enrichBtn.disabled = true;
+                    enrichBtn.textContent = 'Enrichissement lancé…';
+                    try {
+                        const res = await fetch(`/api/sites/${siteId}/enrich-articles?limit=50`, { method: 'POST' });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.error || 'Erreur enrichissement');
+                        this.updateStatus('Enrichissement en file (les articles se mettront a jour)', 'success');
+                        enrichBtn.textContent = 'Enrichir les articles';
+                        enrichBtn.disabled = false;
+                    } catch (err) {
+                        this.updateStatus(`Erreur: ${err.message}`, 'error');
+                        enrichBtn.disabled = false;
+                        enrichBtn.textContent = 'Enrichir les articles';
+                    }
+                });
+            }
+
             const deleteDetailBtn = resultsDiv.querySelector('[data-delete-site-detail]');
             if (deleteDetailBtn) {
                 deleteDetailBtn.addEventListener('click', () => this.deleteSite(siteId));
             }
+
+            resultsDiv.querySelectorAll('[data-article-id]').forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    if (e.target.closest('a')) return;
+                    const id = Number(el.dataset.articleId);
+                    if (id) this.selectArticle(id);
+                });
+            });
             
         } catch (error) {
             console.error('Erreur lors du chargement des détails:', error);
+        }
+    }
+
+    renderArticleListItem(article) {
+        const status = article.enrich_status || '';
+        const badge = status
+            ? `<span class="article-enrich-badge ${this.escapeAttr(status)}">${this.escapeHtml(status)}</span>`
+            : '';
+        const selected = this.selectedArticleId === article.id ? ' is-selected' : '';
+        return `
+            <div class="rss-feed article-item${selected}" data-article-id="${article.id}">
+                <h4>${this.escapeHtml(article.title || 'Sans titre')}${badge}</h4>
+                ${article.summary ? `<p>${this.escapeHtml(this.stripHtml(article.summary).slice(0, 160))}${this.stripHtml(article.summary).length > 160 ? '…' : ''}</p>` : ''}
+                <small>
+                    ${article.published_at ? this.escapeHtml(new Date(article.published_at).toLocaleString()) : 'Date inconnue'}
+                </small>
+            </div>
+        `;
+    }
+
+    _clearArticlePoll() {
+        if (this._articlePollTimer) {
+            clearInterval(this._articlePollTimer);
+            this._articlePollTimer = null;
+        }
+    }
+
+    async selectArticle(articleId) {
+        this.selectedArticleId = articleId;
+        document.querySelectorAll('.article-item').forEach((el) => {
+            el.classList.toggle('is-selected', Number(el.dataset.articleId) === articleId);
+        });
+
+        const reader = document.getElementById('articleReader');
+        if (!reader) return;
+        reader.classList.remove('empty');
+        reader.innerHTML = `<p class="reader-meta">Chargement…</p>`;
+
+        try {
+            let article = await this.fetchArticle(articleId);
+            if (!article) throw new Error('Article introuvable');
+
+            if (article.enrich_status !== 'ok' && article.enrich_status !== 'pending') {
+                await fetch(`/api/articles/${articleId}/enrich`, { method: 'POST' });
+                this.renderArticleReader(article, { loading: true });
+                this._pollArticleUntilDone(articleId);
+                return;
+            }
+
+            if (article.enrich_status === 'pending') {
+                this.renderArticleReader(article, { loading: true });
+                this._pollArticleUntilDone(articleId);
+                return;
+            }
+
+            this.renderArticleReader(article, { loading: false });
+        } catch (err) {
+            reader.innerHTML = `<p class="reader-meta">Erreur: ${this.escapeHtml(err.message)}</p>`;
+        }
+    }
+
+    async fetchArticle(articleId) {
+        const res = await fetch(`/api/articles/${articleId}`);
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.error || data.detail || 'Chargement impossible');
+        }
+        return res.json();
+    }
+
+    _pollArticleUntilDone(articleId) {
+        this._clearArticlePoll();
+        let tries = 0;
+        this._articlePollTimer = setInterval(async () => {
+            tries += 1;
+            if (this.selectedArticleId !== articleId || tries > 40) {
+                this._clearArticlePoll();
+                return;
+            }
+            try {
+                const article = await this.fetchArticle(articleId);
+                if (article.enrich_status === 'ok' || article.enrich_status === 'error') {
+                    this._clearArticlePoll();
+                    this.renderArticleReader(article, { loading: false });
+                    this._updateArticleBadge(articleId, article.enrich_status);
+                }
+            } catch (_) {
+                /* ignore transient */
+            }
+        }, 1500);
+    }
+
+    _updateArticleBadge(articleId, status) {
+        const el = document.querySelector(`.article-item[data-article-id="${articleId}"] h4`);
+        if (!el) return;
+        let badge = el.querySelector('.article-enrich-badge');
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'article-enrich-badge';
+            el.appendChild(badge);
+        }
+        badge.className = `article-enrich-badge ${status || ''}`;
+        badge.textContent = status || '';
+    }
+
+    renderArticleReader(article, { loading } = {}) {
+        const reader = document.getElementById('articleReader');
+        if (!reader || this.selectedArticleId !== article.id) return;
+        reader.classList.remove('empty');
+
+        const meta = article.article_meta && typeof article.article_meta === 'object'
+            ? article.article_meta
+            : {};
+        const author = article.author || meta.author || '';
+        const published = article.published_at
+            ? new Date(article.published_at).toLocaleString()
+            : (meta.date_published || '');
+        const images = Array.isArray(article.images) ? article.images : [];
+        const heroImages = images.slice(0, 4);
+
+        let bodyHtml = '';
+        if (loading) {
+            bodyHtml = `<p class="reader-meta">Enrichissement en cours (fetch de la page)…</p>
+                ${article.summary ? `<div class="reader-body"><p>${this.escapeHtml(this.stripHtml(article.summary))}</p></div>` : ''}`;
+        } else if (article.enrich_status === 'error') {
+            bodyHtml = `<p class="reader-meta">Enrichissement echoue: ${this.escapeHtml(article.enrich_error || 'erreur')}</p>
+                ${article.summary ? `<div class="reader-body"><p>${this.escapeHtml(this.stripHtml(article.summary))}</p></div>` : ''}`;
+        } else if (article.content_html) {
+            bodyHtml = `<div class="reader-body">${article.content_html}</div>`;
+        } else if (article.content_text) {
+            bodyHtml = `<div class="reader-body"><p>${this.escapeHtml(article.content_text).replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>')}</p></div>`;
+        } else if (article.summary) {
+            bodyHtml = `<div class="reader-body"><p>${this.escapeHtml(this.stripHtml(article.summary))}</p></div>`;
+        } else {
+            bodyHtml = `<p class="reader-meta">Pas de contenu disponible</p>`;
+        }
+
+        const sources = Array.isArray(meta.sources) ? meta.sources.join(', ') : '';
+
+        reader.innerHTML = `
+            <h3>${this.escapeHtml(article.title || 'Sans titre')}</h3>
+            <div class="reader-meta">
+                ${published ? this.escapeHtml(published) : ''}
+                ${author ? ` · ${this.escapeHtml(author)}` : ''}
+                ${sources ? ` · meta: ${this.escapeHtml(sources)}` : ''}
+            </div>
+            ${heroImages.length ? `
+                <div class="reader-images">
+                    ${heroImages.map(img => `
+                        <img src="${this.escapeAttr(img.url)}" alt="${this.escapeAttr(img.alt || '')}" loading="lazy" onerror="this.style.display='none'">
+                    `).join('')}
+                </div>
+            ` : ''}
+            ${bodyHtml}
+            <div class="reader-actions">
+                <a href="${this.escapeAttr(article.link)}" target="_blank" rel="noopener noreferrer">Ouvrir l'original</a>
+                ${article.enrich_status === 'ok' ? `
+                    · <button type="button" class="btn" data-reenrich="${article.id}" style="width:auto;padding:6px 12px;font-size:13px;display:inline-block">Relire la page</button>
+                ` : ''}
+            </div>
+        `;
+
+        const reBtn = reader.querySelector('[data-reenrich]');
+        if (reBtn) {
+            reBtn.addEventListener('click', async () => {
+                reBtn.disabled = true;
+                try {
+                    await fetch(`/api/articles/${article.id}/enrich?force=1`, { method: 'POST' });
+                    this.renderArticleReader(article, { loading: true });
+                    this._pollArticleUntilDone(article.id);
+                } catch (err) {
+                    this.updateStatus(`Erreur: ${err.message}`, 'error');
+                }
+            });
+        }
+    }
+
+    handleArticleEnriched(data) {
+        const articleId = Number(data.article_id);
+        if (!articleId) return;
+        this._updateArticleBadge(articleId, data.status);
+        if (this.selectedArticleId === articleId) {
+            this.fetchArticle(articleId)
+                .then((article) => this.renderArticleReader(article, { loading: false }))
+                .catch(() => {});
         }
     }
 

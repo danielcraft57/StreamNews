@@ -28,7 +28,7 @@ app.use(helmet({
             defaultSrc: ["'self'"],
             styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
             scriptSrc: ["'self'"],
-            imgSrc: ["'self'", "data:", "https:"],
+            imgSrc: ["'self'", "data:", "http:", "https:"],
             fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "data:"],
             connectSrc: ["'self'", "ws:", "wss:"],
             upgradeInsecureRequests: null,
@@ -187,6 +187,64 @@ app.post('/api/sites/:id/ingest-articles', async (req, res) => {
         res.status(status).json({
             error: 'Erreur lors de l\'ingestion des articles',
             details: error.message
+        });
+    }
+});
+
+app.get('/api/articles/:id', async (req, res) => {
+    try {
+        const response = await axios.get(`${ANALYZER_URL}/articles/${req.params.id}`, {
+            timeout: 15000
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur lors de la récupération de l\'article:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors de la récupération de l\'article',
+            details: error.response?.data?.detail || error.message
+        });
+    }
+});
+
+app.post('/api/articles/:id/enrich', async (req, res) => {
+    try {
+        const response = await axios.post(
+            `${ANALYZER_URL}/articles/${req.params.id}/enrich`,
+            {},
+            {
+                timeout: 15000,
+                params: { force: req.query.force === '1' || req.query.force === 'true' }
+            }
+        );
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur lors de l\'enrichissement de l\'article:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors de l\'enrichissement de l\'article',
+            details: error.response?.data?.detail || error.message
+        });
+    }
+});
+
+app.post('/api/sites/:id/enrich-articles', async (req, res) => {
+    try {
+        const response = await axios.post(
+            `${ANALYZER_URL}/sites/${req.params.id}/enrich-articles`,
+            {},
+            {
+                timeout: 30000,
+                params: { limit: req.query.limit || 50 }
+            }
+        );
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur lors de l\'enrichissement bulk:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors de l\'enrichissement des articles',
+            details: error.response?.data?.detail || error.message
         });
     }
 });

@@ -117,7 +117,7 @@ Voir [deploy/HOMELAB.md](deploy/HOMELAB.md).
 |-------|------|
 | **node6** | Postgres + Redis |
 | **node7** | web + analyzer (pas de worker) |
-| **node8+** | workers Celery (crawl RSS) |
+| **node8+** | workers Celery (crawl / ingest) |
 
 ## Licence
 

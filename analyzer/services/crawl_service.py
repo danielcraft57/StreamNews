@@ -13,6 +13,7 @@ from logging_config import get_logger
 from models import CrawlResult, FeedRef
 from rss_analyzer import RSSAnalyzer
 from utils import normalize_url
+from utils.meta import extract_site_meta
 
 logger = get_logger(__name__)
 
@@ -64,6 +65,7 @@ class CrawlService:
             rss_feeds=feeds,
             total_pages_analyzed=raw.get("total_pages_analyzed", 0),
             error=raw.get("error"),
+            site_meta=raw.get("site_meta"),
         )
 
 
@@ -153,6 +155,7 @@ class _HookedAnalyzer(RSSAnalyzer):
         all_rss_feeds: List[dict] = []
         pages_analyzed = 0
         seen_keys: Set[str] = set()
+        site_meta = None
         # (url_brute, depth_restant)
         queue: deque = deque([(base_url, depth)])
 
@@ -225,6 +228,13 @@ class _HookedAnalyzer(RSSAnalyzer):
 
                             feeds = await self.extract_rss_from_html(final_url or url, html, soup)
                             hrefs = self._extract_internal_hrefs(base_url, final_url or url, soup) if rem > 0 else []
+                            meta = None
+                            # Meta site = page d'accueil uniquement
+                            if normalize_url(final_url or url) == normalize_url(base_url):
+                                try:
+                                    meta = extract_site_meta(final_url or url, html, soup)
+                                except Exception as exc:
+                                    logger.warning("extract_site_meta: %s", exc)
                             return {
                                 "url": final_url or url,
                                 "title": title,
@@ -232,6 +242,7 @@ class _HookedAnalyzer(RSSAnalyzer):
                                 "hrefs": hrefs,
                                 "rem": rem,
                                 "key": final_key,
+                                "meta": meta,
                             }
 
                     results = await asyncio.gather(
@@ -247,6 +258,8 @@ class _HookedAnalyzer(RSSAnalyzer):
                         pages_analyzed += 1
                         all_rss_feeds.extend(res["feeds"] or [])
                         await self._emit_page(res["url"], res["title"], res["feeds"] or [])
+                        if res.get("meta") and site_meta is None:
+                            site_meta = res["meta"]
 
                         if res["rem"] > 0 and pages_analyzed < max_pages:
                             for href in res["hrefs"]:
@@ -276,6 +289,7 @@ class _HookedAnalyzer(RSSAnalyzer):
                     "rss_feeds": unique,
                     "total_pages_analyzed": pages_analyzed,
                     "status": "completed",
+                    "site_meta": site_meta,
                 }
         except Exception as exc:
             logger.error("Erreur crawl %s: %s", base_url, exc)
@@ -284,4 +298,5 @@ class _HookedAnalyzer(RSSAnalyzer):
                 "total_pages_analyzed": pages_analyzed,
                 "status": "error",
                 "error": str(exc),
+                "site_meta": site_meta,
             }

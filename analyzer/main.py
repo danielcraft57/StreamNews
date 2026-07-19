@@ -11,7 +11,11 @@ logger = setup_logging(service="analyzer")
 
 from database import Database
 from rss_analyzer import RSSAnalyzer
-from celery_worker import analyze_site_task
+from celery_worker import (
+    analyze_site_task,
+    enrich_article_task,
+    enrich_site_articles_task,
+)
 from celery_app import celery_app
 
 app = FastAPI(title="StreamNews Analyzer", version="1.0.0")
@@ -195,6 +199,82 @@ async def ingest_site_articles(site_id: int):
             return {"site_id": site_id, "articles_count": 0, "message": "Aucun flux RSS"}
         count = await db.ingest_rss_articles(site_id, feeds)
         return {"site_id": site_id, "articles_count": count}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/articles/{article_id}")
+async def get_article(article_id: int):
+    """Detail d'un article (contenu enrichi inclus)."""
+    try:
+        article = await db.get_article(article_id)
+        if not article:
+            raise HTTPException(status_code=404, detail="Article non trouvé")
+        return article
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/articles/{article_id}/enrich")
+async def enrich_article(article_id: int, force: bool = False):
+    """Enqueue l'enrichissement d'un article (contenu + meta + images)."""
+    try:
+        article = await db.get_article(article_id)
+        if not article:
+            raise HTTPException(status_code=404, detail="Article non trouvé")
+
+        if article.get("enrich_status") == "ok" and not force:
+            return {
+                "article_id": article_id,
+                "site_id": article.get("site_id"),
+                "status": "ok",
+                "queued": False,
+                "message": "Deja enrichi",
+            }
+
+        await db.set_article_enrich_pending(article_id)
+        async_result = enrich_article_task.delay(article_id, force)
+        logger.info(
+            "Enrich queued article_id=%s task=%s force=%s",
+            article_id,
+            async_result.id,
+            force,
+        )
+        return {
+            "article_id": article_id,
+            "site_id": article.get("site_id"),
+            "status": "pending",
+            "queued": True,
+            "task_id": async_result.id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/sites/{site_id}/enrich-articles")
+async def enrich_site_articles(site_id: int, limit: int = 50):
+    """Enqueue l'enrichissement des articles d'un site (max `limit`)."""
+    try:
+        site = await db.get_site(site_id)
+        if not site:
+            raise HTTPException(status_code=404, detail="Site non trouvé")
+        limit = max(1, min(limit, 200))
+        async_result = enrich_site_articles_task.delay(site_id, limit)
+        logger.info(
+            "Enrich site queued site_id=%s limit=%s task=%s",
+            site_id,
+            limit,
+            async_result.id,
+        )
+        return {
+            "site_id": site_id,
+            "status": "queued",
+            "limit": limit,
+            "task_id": async_result.id,
+        }
     except HTTPException:
         raise
     except Exception as e:

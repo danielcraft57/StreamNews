@@ -31,8 +31,20 @@ class Database:
         data = dict(row)
         if 'rss_feeds' in data:
             data['rss_feeds'] = self._parse_json_field(data['rss_feeds'])
+        if 'meta_extra' in data:
+            raw = self._parse_json_field(data['meta_extra'])
+            data['meta_extra'] = raw if isinstance(raw, dict) else {}
+        if 'images' in data:
+            raw = self._parse_json_field(data['images'])
+            data['images'] = raw if isinstance(raw, list) else []
+        if 'article_meta' in data:
+            raw = self._parse_json_field(data['article_meta'])
+            data['article_meta'] = raw if isinstance(raw, dict) else {}
         # Dates asyncpg -> iso pour le front
-        for key in ('created_at', 'updated_at', 'analyzed_at', 'published_at', 'fetched_at'):
+        for key in (
+            'created_at', 'updated_at', 'analyzed_at', 'published_at',
+            'fetched_at', 'enriched_at',
+        ):
             if key in data and data[key] is not None and hasattr(data[key], 'isoformat'):
                 data[key] = data[key].isoformat()
         return data
@@ -60,12 +72,32 @@ class Database:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     total_pages_analyzed INTEGER DEFAULT 0,
                     rss_feeds JSONB DEFAULT '[]'::jsonb,
-                    celery_task_id VARCHAR(255)
+                    celery_task_id VARCHAR(255),
+                    site_title VARCHAR(500),
+                    favicon_url VARCHAR(1000),
+                    meta_description TEXT,
+                    meta_extra JSONB DEFAULT '{}'::jsonb
                 )
             """)
             await conn.execute("""
                 ALTER TABLE sites
                 ADD COLUMN IF NOT EXISTS celery_task_id VARCHAR(255)
+            """)
+            await conn.execute("""
+                ALTER TABLE sites
+                ADD COLUMN IF NOT EXISTS site_title VARCHAR(500)
+            """)
+            await conn.execute("""
+                ALTER TABLE sites
+                ADD COLUMN IF NOT EXISTS favicon_url VARCHAR(1000)
+            """)
+            await conn.execute("""
+                ALTER TABLE sites
+                ADD COLUMN IF NOT EXISTS meta_description TEXT
+            """)
+            await conn.execute("""
+                ALTER TABLE sites
+                ADD COLUMN IF NOT EXISTS meta_extra JSONB DEFAULT '{}'::jsonb
             """)
 
             await conn.execute("""
@@ -92,6 +124,13 @@ class Database:
                     guid VARCHAR(2000),
                     dedupe_key VARCHAR(2100) NOT NULL DEFAULT '',
                     fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    content_html TEXT,
+                    content_text TEXT,
+                    images JSONB DEFAULT '[]'::jsonb,
+                    article_meta JSONB DEFAULT '{}'::jsonb,
+                    enriched_at TIMESTAMP,
+                    enrich_status VARCHAR(50),
+                    enrich_error TEXT,
                     UNIQUE (site_id, link)
                 )
             """)
@@ -100,8 +139,40 @@ class Database:
                 ADD COLUMN IF NOT EXISTS dedupe_key VARCHAR(2100) NOT NULL DEFAULT ''
             """)
             await conn.execute("""
+                ALTER TABLE articles
+                ADD COLUMN IF NOT EXISTS content_html TEXT
+            """)
+            await conn.execute("""
+                ALTER TABLE articles
+                ADD COLUMN IF NOT EXISTS content_text TEXT
+            """)
+            await conn.execute("""
+                ALTER TABLE articles
+                ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]'::jsonb
+            """)
+            await conn.execute("""
+                ALTER TABLE articles
+                ADD COLUMN IF NOT EXISTS article_meta JSONB DEFAULT '{}'::jsonb
+            """)
+            await conn.execute("""
+                ALTER TABLE articles
+                ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMP
+            """)
+            await conn.execute("""
+                ALTER TABLE articles
+                ADD COLUMN IF NOT EXISTS enrich_status VARCHAR(50)
+            """)
+            await conn.execute("""
+                ALTER TABLE articles
+                ADD COLUMN IF NOT EXISTS enrich_error TEXT
+            """)
+            await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_articles_site_published
                 ON articles (site_id, published_at DESC NULLS LAST)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_articles_enrich_status
+                ON articles (site_id, enrich_status)
             """)
 
             # Installs existantes : forcer ON DELETE CASCADE sans migration
@@ -170,6 +241,36 @@ class Database:
                     status, site_id
                 )
 
+    async def update_site_meta(self, site_id: int, meta: Dict) -> None:
+        """Enregistre titre / favicon / description / meta OG du site."""
+        if not meta:
+            return
+        extra = {
+            k: v
+            for k, v in meta.items()
+            if k in ("og_image", "og_site_name", "theme_color") and v
+        }
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE sites SET
+                    site_title = COALESCE($2, site_title),
+                    favicon_url = COALESCE($3, favicon_url),
+                    meta_description = COALESCE($4, meta_description),
+                    meta_extra = CASE
+                        WHEN $5::jsonb IS NULL THEN meta_extra
+                        ELSE COALESCE(meta_extra, '{}'::jsonb) || $5::jsonb
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $1
+                """,
+                site_id,
+                meta.get("title"),
+                meta.get("favicon_url"),
+                meta.get("description"),
+                json.dumps(extra) if extra else None,
+            )
+
     async def add_page_analysis(self, site_id: int, url: str, title: str = None, rss_feeds: List[Dict] = None):
         """Ajoute l'analyse d'une page"""
         async with self.pool.acquire() as conn:
@@ -231,11 +332,14 @@ class Database:
             return [self._row_to_dict(row) for row in rows]
 
     async def get_site_articles(self, site_id: int, limit: int = 100) -> List[Dict]:
-        """Récupère les articles RSS d'un site (plus récents d'abord)."""
+        """Liste articles (sans gros corps HTML - pour le panneau lecteur)."""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT * FROM articles
+                SELECT id, site_id, feed_url, title, link, summary, author,
+                       published_at, guid, dedupe_key, fetched_at,
+                       images, article_meta, enriched_at, enrich_status, enrich_error
+                FROM articles
                 WHERE site_id = $1
                 ORDER BY published_at DESC NULLS LAST, fetched_at DESC
                 LIMIT $2
@@ -244,6 +348,88 @@ class Database:
                 limit,
             )
             return [self._row_to_dict(row) for row in rows]
+
+    async def get_article(self, article_id: int) -> Optional[Dict]:
+        """Detail d'un article (contenu enrichi inclus)."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM articles WHERE id = $1",
+                article_id,
+            )
+            if row:
+                return self._row_to_dict(row)
+            return None
+
+    async def list_articles_needing_enrichment(
+        self, site_id: int, limit: int = 50
+    ) -> List[Dict]:
+        """Articles sans enrichissement ok (ou en erreur), pour bulk."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, link, enrich_status
+                FROM articles
+                WHERE site_id = $1
+                  AND (enrich_status IS NULL OR enrich_status NOT IN ('ok', 'pending'))
+                ORDER BY published_at DESC NULLS LAST, fetched_at DESC
+                LIMIT $2
+                """,
+                site_id,
+                limit,
+            )
+            return [self._row_to_dict(row) for row in rows]
+
+    async def set_article_enrich_pending(self, article_id: int) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE articles SET
+                    enrich_status = 'pending',
+                    enrich_error = NULL
+                WHERE id = $1
+                """,
+                article_id,
+            )
+
+    async def update_article_enrichment(
+        self,
+        article_id: int,
+        *,
+        content_html: Optional[str] = None,
+        content_text: Optional[str] = None,
+        images: Optional[List[Dict]] = None,
+        article_meta: Optional[Dict] = None,
+        enrich_status: str = "ok",
+        enrich_error: Optional[str] = None,
+        title: Optional[str] = None,
+        author: Optional[str] = None,
+    ) -> None:
+        """Persiste le resultat d'enrichissement (ok ou error)."""
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE articles SET
+                    content_html = COALESCE($2, content_html),
+                    content_text = COALESCE($3, content_text),
+                    images = COALESCE($4::jsonb, images),
+                    article_meta = COALESCE($5::jsonb, article_meta),
+                    enrich_status = $6,
+                    enrich_error = $7,
+                    enriched_at = CASE WHEN $6 = 'ok' THEN CURRENT_TIMESTAMP ELSE enriched_at END,
+                    title = COALESCE($8, title),
+                    author = COALESCE($9, author)
+                WHERE id = $1
+                """,
+                article_id,
+                content_html,
+                content_text,
+                json.dumps(images) if images is not None else None,
+                json.dumps(article_meta) if article_meta is not None else None,
+                enrich_status,
+                enrich_error,
+                ((title or "")[:1000] or None) if title is not None else None,
+                ((author or "")[:500] or None) if author is not None else None,
+            )
 
     async def upsert_article(
         self,

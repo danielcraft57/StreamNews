@@ -20,6 +20,7 @@ from database import Database
 from logging_config import get_logger, setup_logging
 from models import PipelineSummary
 from services.crawl_service import CrawlService
+from services.enrich_service import enrich_article_url
 from services.ingest_service import IngestService
 
 # Worker : s'assurer que logs/worker.log est configure
@@ -121,6 +122,17 @@ async def _crawl_and_persist(site_id: int, url: str, max_pages: int, depth: int)
         result.total_pages_analyzed,
         len(result.rss_feeds),
     )
+    if result.site_meta:
+        await db.update_site_meta(site_id, result.site_meta)
+        _send_ws(
+            {
+                "type": "site_meta",
+                "site_id": site_id,
+                "title": result.site_meta.get("title"),
+                "favicon_url": result.site_meta.get("favicon_url"),
+                "description": result.site_meta.get("description"),
+            }
+        )
     feeds = [f.model_dump() for f in result.rss_feeds]
     # Fusionne RSS/Atom (et http/https) qui portent les memes articles
     from utils import collapse_equivalent_feeds
@@ -333,6 +345,102 @@ def finalize_analysis_task(
         }
     )
     return summary.model_dump()
+
+
+@celery_app.task(name="streamnews.enrich_article")
+def enrich_article_task(article_id: int, force: bool = False) -> dict:
+    """Fetch la page article et stocke contenu + meta + images."""
+
+    async def _run_enrich():
+        db = Database()
+        await db.init_db()
+        article = await db.get_article(article_id)
+        if not article:
+            return {"article_id": article_id, "status": "missing"}
+        if article.get("enrich_status") == "ok" and not force:
+            return {
+                "article_id": article_id,
+                "status": "ok",
+                "skipped": True,
+                "site_id": article.get("site_id"),
+            }
+
+        await db.set_article_enrich_pending(article_id)
+        link = article.get("link") or ""
+        try:
+            data = await enrich_article_url(link)
+            # Ne remplace le titre RSS que si on a quelque chose de plus riche
+            new_title = data.get("title")
+            if new_title and article.get("title") and new_title == article.get("title"):
+                new_title = None
+            await db.update_article_enrichment(
+                article_id,
+                content_html=data.get("content_html") or "",
+                content_text=data.get("content_text") or "",
+                images=data.get("images") or [],
+                article_meta=data.get("article_meta") or {},
+                enrich_status="ok",
+                enrich_error=None,
+                title=new_title,
+                author=data.get("author"),
+            )
+            _send_ws(
+                {
+                    "type": "article_enriched",
+                    "article_id": article_id,
+                    "site_id": article.get("site_id"),
+                    "status": "ok",
+                    "title": data.get("title") or article.get("title"),
+                    "images_count": len(data.get("images") or []),
+                }
+            )
+            return {
+                "article_id": article_id,
+                "status": "ok",
+                "site_id": article.get("site_id"),
+            }
+        except Exception as exc:
+            logger.warning("enrich_article failed id=%s: %s", article_id, exc)
+            await db.update_article_enrichment(
+                article_id,
+                enrich_status="error",
+                enrich_error=str(exc)[:1000],
+            )
+            _send_ws(
+                {
+                    "type": "article_enriched",
+                    "article_id": article_id,
+                    "site_id": article.get("site_id"),
+                    "status": "error",
+                    "error": str(exc)[:300],
+                }
+            )
+            return {
+                "article_id": article_id,
+                "status": "error",
+                "error": str(exc),
+                "site_id": article.get("site_id"),
+            }
+
+    return _run(_run_enrich())
+
+
+@celery_app.task(name="streamnews.enrich_site_articles")
+def enrich_site_articles_task(site_id: int, limit: int = 50) -> dict:
+    """Enqueue l'enrichissement des articles d'un site (sans contenu ok)."""
+
+    async def _list():
+        db = Database()
+        await db.init_db()
+        return await db.list_articles_needing_enrichment(site_id, limit=limit)
+
+    articles = _run(_list())
+    queued = 0
+    for art in articles:
+        enrich_article_task.delay(art["id"], False)
+        queued += 1
+    logger.info("enrich_site_articles site_id=%s queued=%s", site_id, queued)
+    return {"site_id": site_id, "queued": queued}
 
 
 # --- Compat API existante ---

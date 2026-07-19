@@ -6,7 +6,7 @@
 |-------|------|---------|
 | **node6.lan** | data (Postgres + Redis) | Non |
 | **node7.lan** | app (web + analyzer) | Non |
-| **node8.lan** (+…) | worker Celery | Oui |
+| **node8.lan** | worker Celery | Oui |
 
 ```
 UI/API (node7) --> Redis+PG (node6) --> Workers (node8, …)

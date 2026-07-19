@@ -35,6 +35,7 @@ class CrawlResult(BaseModel):
     rss_feeds: List[FeedRef] = Field(default_factory=list)
     total_pages_analyzed: int = 0
     error: Optional[str] = None
+    site_meta: Optional[dict] = None
 
 
 class IngestFeedResult(BaseModel):

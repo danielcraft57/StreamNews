@@ -1,5 +1,6 @@
 from .urls import article_dedupe_key, normalize_identifier, normalize_url
 from .feeds import collapse_equivalent_feeds, fingerprint_feed
+from .meta import extract_site_meta
 
 __all__ = [
     "normalize_url",
@@ -7,4 +8,5 @@ __all__ = [
     "article_dedupe_key",
     "collapse_equivalent_feeds",
     "fingerprint_feed",
+    "extract_site_meta",
 ]

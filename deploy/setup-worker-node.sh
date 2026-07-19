@@ -3,7 +3,7 @@
 # Usage:
 #   sudo DATA_HOST=node6.lan WEB_HOST=node7.lan bash deploy/setup-worker-node.sh
 #
-# Tu peux lancer ca sur node8, node9, etc. pour paralleler les analyses.
+# Tu peux lancer ca sur node8 et d'autres Pi pour paralleler les analyses.
 set -euo pipefail
 
 APP_DIR="${DEPLOY_PATH:-/opt/streamnews}"
@@ -19,7 +19,10 @@ echo "==> Setup WORKER node StreamNews -> $APP_DIR"
 echo "    Redis/PG: $DATA_HOST | WebSocket push: $WEB_HOST"
 
 apt-get update
-apt-get install -y python3 python3-venv python3-pip git
+apt-get install -y \
+  python3 python3-venv python3-pip git \
+  build-essential python3-dev \
+  libxml2-dev libxslt1-dev zlib1g-dev
 
 if [[ ! -d "$APP_DIR/.git" ]]; then
   mkdir -p "$(dirname "$APP_DIR")"

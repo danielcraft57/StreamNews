@@ -14,7 +14,10 @@ PG_PASSWORD="${POSTGRES_PASSWORD:-streamnews123}"
 echo "==> Setup APP node (UI+API only) -> $APP_DIR (data=$DATA_HOST)"
 
 apt-get update
-apt-get install -y python3 python3-venv python3-pip git curl
+apt-get install -y \
+  python3 python3-venv python3-pip git curl \
+  build-essential python3-dev \
+  libxml2-dev libxslt1-dev zlib1g-dev
 
 if ! command -v node &>/dev/null; then
   curl -fsSL https://deb.nodesource.com/setup_18.x | bash -

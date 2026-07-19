@@ -10,7 +10,10 @@ REPO_URL="${REPO_URL:-https://github.com/loupix57/StreamNews.git}"
 echo "==> Setup VPS StreamNews -> $APP_DIR (user $APP_USER)"
 
 apt-get update
-apt-get install -y python3 python3-venv python3-pip postgresql postgresql-contrib redis-server git curl
+apt-get install -y \
+  python3 python3-venv python3-pip postgresql postgresql-contrib redis-server git curl \
+  build-essential python3-dev \
+  libxml2-dev libxslt1-dev zlib1g-dev
 
 if ! command -v node &>/dev/null; then
   curl -fsSL https://deb.nodesource.com/setup_18.x | bash -

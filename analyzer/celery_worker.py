@@ -18,6 +18,8 @@ from tasks import (  # noqa: E402
     analyze_site_task,
     cleanup_old_analyses,
     crawl_site_task,
+    enrich_article_task,
+    enrich_site_articles_task,
     ingest_feed_task,
     finalize_analysis_task,
 )
@@ -27,6 +29,8 @@ __all__ = [
     "analyze_site_task",
     "cleanup_old_analyses",
     "crawl_site_task",
+    "enrich_article_task",
+    "enrich_site_articles_task",
     "ingest_feed_task",
     "finalize_analysis_task",
 ]

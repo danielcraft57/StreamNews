@@ -22,6 +22,9 @@ ENV/
 .env.*
 !.env.example
 
+# Notes agents (local)
+AGENTS.md
+
 # IDE / OS
 .vscode/
 .idea/
