@@ -65,7 +65,7 @@ Group=$APP_USER
 WorkingDirectory=$APP_DIR/analyzer
 EnvironmentFile=$APP_DIR/.env
 Environment=PATH=$APP_DIR/.venv/bin:/usr/bin
-ExecStart=$APP_DIR/.venv/bin/python -m celery -A celery_worker worker --loglevel=info --concurrency=${CONCURRENCY}
+ExecStart=$APP_DIR/.venv/bin/python -m celery -A celery_worker worker --loglevel=info --concurrency=${CONCURRENCY} -Q crawl,ingest,default
 Restart=on-failure
 RestartSec=5
 

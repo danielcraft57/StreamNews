@@ -30,11 +30,10 @@ Decoupage fixe sur le cluster :
 |-------|------|----------|
 | **node6.lan** | `data` | PostgreSQL + Redis uniquement |
 | **node7.lan** | `app` | web + analyzer **sans worker** (UI fluide) |
-| **node8.lan** (+ autres) | `worker` | Celery crawl/traitement RSS |
+| **node8.lan** (+ autres) | `worker` | Celery queues `crawl,ingest,default` |
 
-Les workers partagent la queue Redis de node6 : plus de workers = plus de crawls en parallele.
-
-Docs detaillees : `deploy/HOMELAB.md`
+Pipeline : crawl (pages paralleles) -> fan-out ingest feeds -> finalize.
+Voir `analyzer/ARCHITECTURE.md`.
 
 Setup :
 ```bash
