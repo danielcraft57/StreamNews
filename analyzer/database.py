@@ -1,12 +1,41 @@
 import os
 import asyncpg
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import json
 
 class Database:
     def __init__(self):
         self.database_url = os.getenv("DATABASE_URL", "postgresql://streamnews:streamnews123@localhost:5432/streamnews")
         self.pool = None
+
+    @staticmethod
+    def _parse_json_field(value: Any):
+        """asyncpg renvoie souvent le JSONB en str : on normalise en objet Python."""
+        if value is None:
+            return []
+        if isinstance(value, (list, dict)):
+            return value
+        if isinstance(value, (bytes, bytearray)):
+            value = value.decode()
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return []
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return []
+        return value
+
+    def _row_to_dict(self, row) -> Dict:
+        data = dict(row)
+        if 'rss_feeds' in data:
+            data['rss_feeds'] = self._parse_json_field(data['rss_feeds'])
+        # Dates asyncpg -> iso pour le front
+        for key in ('created_at', 'updated_at', 'analyzed_at'):
+            if key in data and data[key] is not None and hasattr(data[key], 'isoformat'):
+                data[key] = data[key].isoformat()
+        return data
 
     async def init_db(self):
         """Initialise la connexion à la base de données et crée les tables"""
@@ -77,14 +106,14 @@ class Database:
                 site_id
             )
             if row:
-                return dict(row)
+                return self._row_to_dict(row)
             return None
 
     async def get_all_sites(self) -> List[Dict]:
         """Récupère tous les sites analysés"""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("SELECT * FROM sites ORDER BY created_at DESC")
-            return [dict(row) for row in rows]
+            return [self._row_to_dict(row) for row in rows]
 
     async def get_site_pages(self, site_id: int) -> List[Dict]:
         """Récupère toutes les pages d'un site"""
@@ -93,7 +122,7 @@ class Database:
                 "SELECT * FROM pages WHERE site_id = $1 ORDER BY analyzed_at DESC",
                 site_id
             )
-            return [dict(row) for row in rows]
+            return [self._row_to_dict(row) for row in rows]
 
     async def cleanup_old_analyses(self, days: int = 30) -> int:
         """Supprime les analyses (sites + pages) plus anciennes que N jours."""

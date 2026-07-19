@@ -164,6 +164,20 @@ class StreamNewsApp {
         }
     }
 
+    parseRssFeeds(value) {
+        if (!value) return [];
+        if (Array.isArray(value)) return value;
+        if (typeof value === 'string') {
+            try {
+                const parsed = JSON.parse(value);
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                return [];
+            }
+        }
+        return [];
+    }
+
     async loadSites() {
         try {
             const response = await fetch('/api/sites');
@@ -172,7 +186,9 @@ class StreamNewsApp {
             const sitesList = document.getElementById('sitesList');
             
             if (data.sites && data.sites.length > 0) {
-                sitesList.innerHTML = data.sites.map(site => `
+                sitesList.innerHTML = data.sites.map(site => {
+                    const feeds = this.parseRssFeeds(site.rss_feeds);
+                    return `
                     <div class="site-item" data-site-id="${site.id}" role="button" tabindex="0">
                         <h4>${site.url}</h4>
                         <div class="site-info">
@@ -180,9 +196,10 @@ class StreamNewsApp {
                             <span class="date">${new Date(site.created_at).toLocaleString()}</span>
                         </div>
                         ${site.total_pages_analyzed ? `<div>Pages: ${site.total_pages_analyzed}</div>` : ''}
-                        ${site.rss_feeds && site.rss_feeds.length > 0 ? `<div>RSS: ${site.rss_feeds.length}</div>` : ''}
+                        ${feeds.length > 0 ? `<div>RSS: ${feeds.length}</div>` : ''}
                     </div>
-                `).join('');
+                `;
+                }).join('');
             } else {
                 sitesList.innerHTML = '<p>Aucun site analysé pour le moment</p>';
             }
@@ -195,6 +212,7 @@ class StreamNewsApp {
         try {
             const response = await fetch(`/api/sites/${siteId}`);
             const site = await response.json();
+            const feeds = this.parseRssFeeds(site.rss_feeds);
             
             this.clearResults();
             this.showResults();
@@ -209,14 +227,14 @@ class StreamNewsApp {
                     <p><strong>Date:</strong> ${new Date(site.created_at).toLocaleString()}</p>
                 </div>
                 
-                ${site.rss_feeds && site.rss_feeds.length > 0 ? `
-                    <h4>Flux RSS trouvés (${site.rss_feeds.length})</h4>
+                ${feeds.length > 0 ? `
+                    <h4>Flux RSS trouvés (${feeds.length})</h4>
                     <div class="rss-feeds">
-                        ${site.rss_feeds.map(feed => `
+                        ${feeds.map(feed => `
                             <div class="rss-feed">
-                                <h4>${feed.title}</h4>
-                                <p><a href="${feed.url}" target="_blank">${feed.url}</a></p>
-                                <small>Type: ${feed.type} | Source: ${feed.source_page}</small>
+                                <h4>${feed.title || 'Flux RSS'}</h4>
+                                <p><a href="${feed.url}" target="_blank" rel="noopener noreferrer">${feed.url}</a></p>
+                                <small>Type: ${feed.type || '-'} | Source: ${feed.source_page || '-'}</small>
                             </div>
                         `).join('')}
                     </div>
