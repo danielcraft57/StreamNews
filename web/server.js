@@ -18,9 +18,11 @@ const clients = new Set();
 // Configuration des variables d'environnement
 const ANALYZER_URL = process.env.ANALYZER_URL || 'http://localhost:8000';
 
-// Middleware de sécurité
+// Helmet en mode HTTP LAN (homelab) : pas de HSTS / upgrade HTTPS
+// sinon le navigateur force https://node7.lan et casse app.js / le formulaire.
 app.use(helmet({
     contentSecurityPolicy: {
+        useDefaults: true,
         directives: {
             defaultSrc: ["'self'"],
             styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
@@ -28,8 +30,13 @@ app.use(helmet({
             imgSrc: ["'self'", "data:", "https:"],
             fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "data:"],
             connectSrc: ["'self'", "ws:", "wss:"],
+            upgradeInsecureRequests: null,
         },
     },
+    hsts: false,
+    crossOriginOpenerPolicy: false,
+    originAgentCluster: false,
+    crossOriginEmbedderPolicy: false,
 }));
 
 // Middleware
