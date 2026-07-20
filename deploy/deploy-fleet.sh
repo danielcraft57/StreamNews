@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Deploy multi-noeuds depuis un bastion (node12) joignable par GitHub Actions.
-# Usage (sur node12) :
+# Deploy multi-noeuds depuis le bastion SSH (secret DEPLOY_HOST, ex: node9).
+# Usage (sur le bastion) :
 #   bash deploy/deploy-fleet.sh
 #
 # Variables optionnelles :
@@ -9,6 +9,8 @@
 #   DEPLOY_PATH=/opt/streamnews
 #
 # Les noeuds partent en parallele (pip/npm en meme temps) pour couper le temps CD.
+# L'edge nginx public (ex: node12) est un autre role : reload ici seulement si le
+# vhost StreamNews est present sur CE bastion.
 set -euo pipefail
 
 FLEET_USER="${FLEET_USER:-pi}"

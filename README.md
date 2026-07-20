@@ -83,21 +83,23 @@ La CI GitHub Actions lance unitaires + e2e (services Postgres/Redis, stack compl
 ## CI/CD (GitHub Actions)
 
 - **Tests** (`.github/workflows/ci.yml`) : sur push/PR `main` - unitaires + integration + e2e
-- **Mise en ligne** (`.github/workflows/deploy.yml`) : **apres Tests verts** - SSH node12 → flotte
+- **Mise en ligne** (`.github/workflows/deploy.yml`) : **apres Tests verts** - SSH bastion (`DEPLOY_HOST`) → flotte LAN
 
 Pas de double run : la mise en ligne attend juste le resultat des Tests.
 
-Secrets / variables (Settings → Actions) — **bastion = node12**, pas node7 :
+Secrets / variables (Settings → Actions) — **bastion SSH = `DEPLOY_HOST`** (chez nous node9 / `raspberry-9`), pas node7 :
 
 | Type | Name | Exemple |
 |------|------|---------|
 | Variable | `ENABLE_DEPLOY` | `true` |
 | Variable | `FLEET_HOSTS` | `node6.lan node7.lan node8.lan` |
 | Variable | `FLEET_USER` | `pi` |
-| Secret | `DEPLOY_HOST` | IP publique de **node12**, ou hostname SSH (`streamnews.danielcraft.fr`) **sans** `https://` |
+| Secret | `DEPLOY_HOST` | IP publique (ou hostname SSH) du **bastion** qui joignable la flotte LAN — **sans** `https://` |
 | Secret | `DEPLOY_USER` | `pi` |
 | Secret | `DEPLOY_SSH_KEY` | cle privee SSH |
 | Secret | `DEPLOY_PATH` | `/opt/streamnews` |
+
+Le bastion CD n'est pas forcement l'edge nginx public (ex: node12 pour `streamnews.danielcraft.fr`).
 
 Deploy demarre seulement apres une CI `success` sur `main` (plus de 2e e2e).
 

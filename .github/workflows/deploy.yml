@@ -46,7 +46,7 @@ jobs:
           echo "host=$H" >> "$GITHUB_OUTPUT"
           echo "SSH host normalise: $H"
 
-      - name: Deployer la flotte via node12
+      - name: Deployer la flotte via bastion SSH
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ steps.ssh.outputs.host }}
@@ -58,6 +58,7 @@ jobs:
           envs: FLEET_HOSTS,FLEET_USER,DEPLOY_PATH,DEPLOY_PATH_EDGE
           script: |
             set -euo pipefail
+            # Bastion = secret DEPLOY_HOST (ex: node9 / raspberry-9), PAS forcement l'edge nginx
             APP_EDGE="${DEPLOY_PATH_EDGE:-/opt/streamnews-edge}"
             REPO="https://github.com/danielcraft57/StreamNews.git"
             if [[ ! -d "$APP_EDGE/.git" ]]; then
@@ -72,6 +73,7 @@ jobs:
             export FLEET_USER="${FLEET_USER:-pi}"
             export DEPLOY_PATH="${DEPLOY_PATH:-/opt/streamnews}"
             export DEPLOY_BRANCH=main
+            echo "Bastion SSH: $(hostname -s) -> flotte $FLEET_HOSTS"
             bash "$APP_EDGE/deploy/deploy-fleet.sh"
         env:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
