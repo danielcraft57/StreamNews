@@ -6,7 +6,10 @@ from unittest.mock import MagicMock
 sys.modules.setdefault("aiohttp", MagicMock())
 sys.modules.setdefault("feedparser", MagicMock())
 sys.modules.setdefault("bs4", MagicMock())
-sys.modules.setdefault("asyncpg", MagicMock())
+try:
+    import asyncpg  # noqa: F401
+except ImportError:
+    sys.modules["asyncpg"] = MagicMock()
 sys.modules.setdefault("celery", MagicMock())
 sys.modules.setdefault("requests", MagicMock())
 
