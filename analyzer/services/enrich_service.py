@@ -13,12 +13,12 @@ import trafilatura
 from bs4 import BeautifulSoup
 
 from logging_config import get_logger
-from text_analysis.clean import strip_links_from_html
+from text_analysis.clean import strip_links_from_html, strip_urls_from_text
 from utils.image_urls import (
     build_images_list,
     pick_primary_image,
     strip_primary_image_from_html,
-), strip_urls_from_text
+)
 
 logger = get_logger(__name__)
 
