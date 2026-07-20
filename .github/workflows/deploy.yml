@@ -16,16 +16,38 @@ jobs:
   deploy:
     needs: ci
     runs-on: ubuntu-latest
-    # Skip tant que les secrets VPS ne sont pas configures
+    # Skip tant que ENABLE_DEPLOY != true
     if: ${{ vars.ENABLE_DEPLOY == 'true' }}
+    env:
+      # Bastion = node12 (IP publique ou hostname joignable depuis GitHub)
+      # Flotte LAN derriere le bastion
+      FLEET_HOSTS: ${{ vars.FLEET_HOSTS }}
+      FLEET_USER: ${{ vars.FLEET_USER }}
     steps:
-      - name: Deploy over SSH
+      - name: Deploy fleet via bastion (node12)
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: FLEET_HOSTS,FLEET_USER,DEPLOY_PATH,DEPLOY_PATH_EDGE
           script: |
             set -euo pipefail
-            cd "${{ secrets.DEPLOY_PATH }}"
-            bash deploy/deploy.sh
+            APP_EDGE="${DEPLOY_PATH_EDGE:-/opt/streamnews-edge}"
+            REPO="https://github.com/danielcraft57/StreamNews.git"
+            if [[ ! -d "$APP_EDGE/.git" ]]; then
+              sudo mkdir -p "$(dirname "$APP_EDGE")"
+              sudo git clone --branch main "$REPO" "$APP_EDGE"
+              sudo chown -R "$(whoami):$(whoami)" "$APP_EDGE"
+            else
+              git -C "$APP_EDGE" fetch origin
+              git -C "$APP_EDGE" reset --hard origin/main
+            fi
+            export FLEET_HOSTS="${FLEET_HOSTS:-node6.lan node7.lan node8.lan}"
+            export FLEET_USER="${FLEET_USER:-pi}"
+            export DEPLOY_PATH="${DEPLOY_PATH:-/opt/streamnews}"
+            export DEPLOY_BRANCH=main
+            bash "$APP_EDGE/deploy/deploy-fleet.sh"
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PATH_EDGE: ${{ secrets.DEPLOY_PATH_EDGE }}

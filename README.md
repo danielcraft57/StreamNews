@@ -85,16 +85,19 @@ La CI GitHub Actions lance unitaires + e2e (services Postgres/Redis, stack compl
 - **CI** (`.github/workflows/ci.yml`) : sur push/PR `main` - install Python/Node + smoke checks
 - **Deploy** (`.github/workflows/deploy.yml`) : sur push `main` - CI puis SSH + `deploy/deploy.sh`
 
-Secrets a creer dans le repo GitHub (Settings > Secrets and variables > Actions) :
+Secrets / variables (Settings → Actions) — **bastion = node12**, pas node7 :
 
-| Secret | Exemple |
-|--------|---------|
-| `DEPLOY_HOST` | `203.0.113.10` |
-| `DEPLOY_USER` | `streamnews` ou un user avec sudo |
-| `DEPLOY_SSH_KEY` | cle privee SSH |
-| `DEPLOY_PATH` | `/opt/streamnews` |
+| Type | Name | Exemple |
+|------|------|---------|
+| Variable | `ENABLE_DEPLOY` | `true` |
+| Variable | `FLEET_HOSTS` | `node6.lan node7.lan node8.lan` |
+| Variable | `FLEET_USER` | `pi` |
+| Secret | `DEPLOY_HOST` | IP publique de **node12** |
+| Secret | `DEPLOY_USER` | `pi` |
+| Secret | `DEPLOY_SSH_KEY` | cle privee SSH |
+| Secret | `DEPLOY_PATH` | `/opt/streamnews` |
 
-Sans ces secrets, configure aussi la variable repo `ENABLE_DEPLOY=true` (Settings > Variables) pour activer le job Deploy. Tant que ce n'est pas fait, seul le CI tests tourne.
+Depuis node12, Actions lance `deploy/deploy-fleet.sh` qui SSH vers chaque Pi du LAN et execute `deploy/deploy.sh` (role lu dans le `.env` local : data / app / worker).
 
 Repo : https://github.com/danielcraft57/StreamNews
 
