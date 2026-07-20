@@ -31,6 +31,11 @@ case "${DATABASE_URL:-}" in
 esac
 
 cd analyzer
-STREAMNEWS_RESET_DB="$RESET" python -c \
-  "from database import Database; import asyncio; asyncio.run(Database().init_db(reset=$RESET))"
+RESET_ARGS=""
+if [[ "$RESET" -eq 1 ]]; then
+  RESET_ARGS="--reset"
+fi
+echo "[init-db] env=${STREAMNEWS_ENV:-?} url=${DATABASE_URL%%\?*}"
+echo "[init-db] lancement Python..."
+STREAMNEWS_RESET_DB="$RESET" python -u init_db_cli.py $RESET_ARGS
 echo "Base initialisee (${STREAMNEWS_ENV:-?})."

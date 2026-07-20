@@ -11,11 +11,11 @@ Pas de Docker. Roles fixes sur le LAN.
 | **node8+** | `worker` | Celery (`crawl`, `ingest`, `default`) |
 | **node9** | bastion SSH | point d'entree CD (GitHub Actions) |
 | **node12** | edge nginx | HTTPS public → proxy vers node7 |
-| **node13** | Redis local-dev | broker optionnel pour SQLite sur ton PC |
+| **node14** | Redis local-dev | broker pour le mode local PC (SQLite) |
 
 ```
-Dev PC (SQLite) ----Redis----> node13 (optionnel)
-                     |
+Dev PC (SQLite + .env.local) ----Redis----> node14
+                                    |
 UI/API (node7) --> Redis+PG (node6) --> Workers (node8…)
        ^
        | proxy TLS
@@ -50,12 +50,19 @@ Ne jamais committer `/opt/streamnews/.env`.
 
 ## Mode local (PC)
 
-Voir le README racine : SQLite dans `data/` + Redis distant.
+SQLite dans `data/` + Redis sur **node14** (fichier `.env.local`, isole de la prod).
 
+**Windows :**
+```powershell
+.\scripts\install.ps1
+.\scripts\init-db.ps1 -Local
+.\scripts\dev.ps1 -Local
+```
+
+**Linux / macOS :**
 ```bash
-cp .env.local.example .env.local
-# adapte REDIS_URL
 bash scripts/install.sh
+cp .env.local.example .env.local   # REDIS_URL=redis://node14.lan:6379/0
 bash scripts/init-db.sh --local
 bash scripts/dev.sh --local
 ```

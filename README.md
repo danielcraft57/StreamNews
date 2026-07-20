@@ -27,23 +27,36 @@ Deux modes (fichiers d'env **non** versionnes) :
 
 | Mode | Fichier | DB | Redis |
 |------|---------|-----|-------|
-| **Local** | `.env.local` | SQLite (`data/streamnews.db`) | ex. un Pi Redis |
-| **Prod-like** | `.env` | Postgres | localhost ou homelab |
+| **Local** | `.env.local` | SQLite (`data/streamnews.db`) | `node14.lan` |
+| **Prod / prod-like** | `.env` | Postgres | localhost ou `node6.lan` |
+
+### Windows (PowerShell)
+
+Prerequis : Python 3.11+ et Node.js 18+ (Python 3.13 OK en mode local SQLite).
+
+```powershell
+.\scripts\install.ps1
+.\scripts\init-db.ps1 -Local
+.\scripts\dev.ps1 -Local
+```
+
+Sous Windows, Celery tourne avec `--pool=solo` (obligatoire, pas de prefork).
+
+### Linux / macOS (bash)
 
 ```bash
 bash scripts/install.sh
-
-# Local (SQLite)
-cp .env.local.example .env.local   # si pas deja cree par install.sh
-# adapte REDIS_URL si besoin
 bash scripts/init-db.sh --local
 bash scripts/dev.sh --local
+```
 
-# Postgres local
+### Prod-like (Postgres)
+
+```bash
 cp .env.example .env
 # Remplace TOUS les CHANGE_ME, cree user/db Postgres
-bash scripts/init-db.sh
-bash scripts/dev.sh
+bash scripts/init-db.sh    # ou .\scripts\init-db.ps1 sous Windows
+bash scripts/dev.sh        # ou .\scripts\dev.ps1
 ```
 
 UI : http://localhost:3000
@@ -54,10 +67,10 @@ Modeles versionnes (sans secrets) : `.env.example`, `.env.local.example`.
 
 | Script | Role |
 |--------|------|
-| `scripts/install.sh` | venv + deps Python/Node + cree les .env d'exemple |
-| `scripts/load-env.sh` | charge `.env.local` (`--local`) ou `.env` |
-| `scripts/init-db.sh` | cree le schema (`--local`, `--reset`) |
-| `scripts/dev.sh` | lance analyzer + worker + web |
+| `scripts/install.ps1` / `install.sh` | venv + deps Python/Node + cree les .env d'exemple |
+| `scripts/load-env.ps1` / `load-env.sh` | charge `.env.local` (`-Local` / `--local`) ou `.env` |
+| `scripts/init-db.ps1` / `init-db.sh` | cree le schema (`-Local` / `--local`, `-Reset` / `--reset`) |
+| `scripts/dev.ps1` / `dev.sh` | lance analyzer + worker + web |
 | `scripts/e2e-stack.sh` | stack pour Playwright (CI / Postgres local) |
 
 ## Variables d'environnement
@@ -100,7 +113,7 @@ Detail : [deploy/HOMELAB.md](deploy/HOMELAB.md) — index : [deploy/README.md](d
 | **node8+** | workers Celery |
 | **node9** | bastion SSH (CD, secret `DEPLOY_HOST`) |
 | **node12** | edge nginx / TLS public |
-| **node13** | Redis optionnel pour le mode local PC |
+| **node14** | Redis pour le mode local PC (SQLite) |
 
 ## Deploy VPS all-in-one
 
