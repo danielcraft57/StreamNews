@@ -1,7 +1,9 @@
 # Deps
 node_modules/
 e2e/node_modules/
+web/node_modules/
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -12,19 +14,33 @@ __pycache__/
 dist/
 build/
 wheels/
+pip-wheel-metadata/
 
-# Envs
+# Envs / secrets — ne JAMAIS committer
 .venv/
 venv/
 env/
 ENV/
 .env
+.env.local
 .env.*
 !.env.example
+!.env.local.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.secret
+credentials.json
+secrets/
+*.env.bak
 
-# Notes agents / homelab (local)
+# Notes locales agents (hors repo public)
 AGENTS.md
-deploy/HOMELAB.md
+.cursorrules.local
 
 # IDE / OS
 .vscode/
@@ -35,9 +51,11 @@ deploy/HOMELAB.md
 .DS_Store
 Thumbs.db
 Desktop.ini
+.cursor/
 
 # Logs / runtime
-logs/
+logs/*
+!logs/.gitkeep
 *.log
 pids/
 *.pid
@@ -45,8 +63,9 @@ pids/
 *.pid.lock
 npm-debug.log*
 yarn-error.log*
+nohup.out
 
-# Coverage / tests
+# Coverage / tests / caches outils
 coverage/
 *.lcov
 .nyc_output
@@ -54,27 +73,45 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.tox/
+.hypothesis/
+.cache/
 e2e/test-results/
 e2e/playwright-report/
 e2e/blob-report/
 e2e/playwright/.cache/
 
-# Data / cache app
-data/
+# Data locale (SQLite, dumps) — garder le dossier vide en git
+data/*
+!data/.gitkeep
 cache/
 *.cache
 uploads/
 downloads/
 temp_files/
+tmp/
+temp/
+*.tmp
+*.temp
 dump.rdb
 celerybeat-schedule
 celerybeat.pid
+*.db
+*.sqlite
+*.sqlite3
+*-wal
+*-shm
+*.db-wal
+*.db-shm
 
-# Secrets / certs / backups
-*.pem
-*.key
-*.crt
+# Backups / bruit / scripts jetables
 *.bak
 *.backup
 *.old
-*.sqlite3
+*.orig
+*.rej
+*.patch
+*.swp
+scripts/_tmp_*
+scripts/tmp_*
+deploy/_tmp_*

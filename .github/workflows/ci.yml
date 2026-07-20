@@ -14,6 +14,7 @@ jobs:
         image: postgres:15-alpine
         env:
           POSTGRES_USER: streamnews
+          # Mot de passe ephemere du service CI uniquement (pas prod).
           POSTGRES_PASSWORD: streamnews123
           POSTGRES_DB: streamnews
         ports:
@@ -24,6 +25,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
+      # Ephemere CI — voir aussi scripts/e2e-stack.sh
       DATABASE_URL: postgresql://streamnews:streamnews123@localhost:5432/streamnews
     defaults:
       run:
@@ -73,6 +75,7 @@ jobs:
         image: postgres:15-alpine
         env:
           POSTGRES_USER: streamnews
+          # Ephemere CI uniquement (pas prod).
           POSTGRES_PASSWORD: streamnews123
           POSTGRES_DB: streamnews
         ports:
@@ -92,6 +95,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
+      # Ephemere CI — voir aussi scripts/e2e-stack.sh
       DATABASE_URL: postgresql://streamnews:streamnews123@localhost:5432/streamnews
       REDIS_URL: redis://localhost:6379/0
       WEB_URL: http://127.0.0.1:3000

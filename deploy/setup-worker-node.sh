@@ -12,7 +12,12 @@ REPO_URL="${REPO_URL:-https://github.com/danielcraft57/StreamNews.git}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 DATA_HOST="${DATA_HOST:-node6.lan}"
 WEB_HOST="${WEB_HOST:-node7.lan}"
-PG_PASSWORD="${POSTGRES_PASSWORD:-streamnews123}"
+PG_PASSWORD="${POSTGRES_PASSWORD:-}"
+if [[ -z "$PG_PASSWORD" || "$PG_PASSWORD" == "CHANGE_ME" ]]; then
+  echo "ERREUR: definis POSTGRES_PASSWORD (meme valeur que sur le noeud data)."
+  echo "  sudo DATA_HOST=node6.lan WEB_HOST=node7.lan POSTGRES_PASSWORD='…' bash deploy/setup-worker-node.sh"
+  exit 1
+fi
 CONCURRENCY="${CELERY_CONCURRENCY:-1}"
 
 echo "==> Setup WORKER node StreamNews -> $APP_DIR"

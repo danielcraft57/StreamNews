@@ -7,7 +7,12 @@ APP_DIR="${DEPLOY_PATH:-/opt/streamnews}"
 APP_USER="${DEPLOY_APP_USER:-streamnews}"
 REPO_URL="${REPO_URL:-https://github.com/danielcraft57/StreamNews.git}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
-PG_PASSWORD="${POSTGRES_PASSWORD:-streamnews123}"
+PG_PASSWORD="${POSTGRES_PASSWORD:-}"
+if [[ -z "$PG_PASSWORD" || "$PG_PASSWORD" == "CHANGE_ME" ]]; then
+  echo "ERREUR: definis POSTGRES_PASSWORD (mot de passe fort) avant le setup."
+  echo "  sudo POSTGRES_PASSWORD='…' bash deploy/setup-data-node.sh"
+  exit 1
+fi
 # Reseau LAN autorise a joindre Postgres/Redis (adapte si besoin)
 LAN_CIDR="${LAN_CIDR:-192.168.1.0/24}"
 
@@ -61,6 +66,7 @@ if [[ ! -f "$APP_DIR/.env" ]]; then
   cp "$APP_DIR/.env.example" "$APP_DIR/.env"
   # Sur le noeud data, URLs locales + role
   sed -i 's|NODE_ENV=development|NODE_ENV=production|' "$APP_DIR/.env"
+  sed -i "s|CHANGE_ME|$PG_PASSWORD|g" "$APP_DIR/.env"
   if grep -q '^STREAMNEWS_ROLE=' "$APP_DIR/.env"; then
     sed -i 's|^STREAMNEWS_ROLE=.*|STREAMNEWS_ROLE=data|' "$APP_DIR/.env"
   else

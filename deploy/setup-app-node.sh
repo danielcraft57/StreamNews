@@ -9,7 +9,12 @@ APP_USER="${DEPLOY_APP_USER:-streamnews}"
 REPO_URL="${REPO_URL:-https://github.com/danielcraft57/StreamNews.git}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 DATA_HOST="${DATA_HOST:-node6.lan}"
-PG_PASSWORD="${POSTGRES_PASSWORD:-streamnews123}"
+PG_PASSWORD="${POSTGRES_PASSWORD:-}"
+if [[ -z "$PG_PASSWORD" || "$PG_PASSWORD" == "CHANGE_ME" ]]; then
+  echo "ERREUR: definis POSTGRES_PASSWORD (meme valeur que sur le noeud data)."
+  echo "  sudo DATA_HOST=node6.lan POSTGRES_PASSWORD='…' bash deploy/setup-app-node.sh"
+  exit 1
+fi
 
 echo "==> Setup APP node (UI+API only) -> $APP_DIR (data=$DATA_HOST)"
 

@@ -1,0 +1,2 @@
+# Dossier data/ : SQLite local, caches.
+# Les fichiers *.db (et -wal/-shm) sont ignores — ne rien y committer de sensible.

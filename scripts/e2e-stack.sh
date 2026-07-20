@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Defaults CI / e2e locaux uniquement (conteneur Postgres ephemere).
+# Ne JAMAIS reutiliser ce mot de passe en prod / homelab.
 export DATABASE_URL="${DATABASE_URL:-postgresql://streamnews:streamnews123@localhost:5432/streamnews}"
 export REDIS_URL="${REDIS_URL:-redis://localhost:6379/0}"
 export WEB_URL="${WEB_URL:-http://127.0.0.1:3000}"
