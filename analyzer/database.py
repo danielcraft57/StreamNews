@@ -629,9 +629,9 @@ class Database:
                     content_text = COALESCE($3, content_text),
                     images = COALESCE($4::jsonb, images),
                     article_meta = COALESCE($5::jsonb, article_meta),
-                    enrich_status = $6,
+                    enrich_status = $6::text,
                     enrich_error = $7,
-                    enriched_at = CASE WHEN $6 = 'ok' THEN CURRENT_TIMESTAMP ELSE enriched_at END,
+                    enriched_at = CASE WHEN $6::text = 'ok' THEN CURRENT_TIMESTAMP ELSE enriched_at END,
                     title = COALESCE($8, title),
                     author = COALESCE($9, author)
                 WHERE id = $1
