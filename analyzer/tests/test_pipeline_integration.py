@@ -138,8 +138,11 @@ async def test_list_articles_needing_enrichment(db, site_id):
         site_id, "https://example.com/rss", "B", "https://example.com/b"
     )
     articles = await db.get_site_articles(site_id)
+    by_link = {a["link"]: a for a in articles}
     await db.update_article_enrichment(
-        articles[0]["id"], enrich_status="ok", content_text="ok"
+        by_link["https://example.com/a"]["id"],
+        enrich_status="ok",
+        content_text="ok",
     )
 
     pending = await db.list_articles_needing_enrichment(site_id, limit=10)
