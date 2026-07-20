@@ -16,7 +16,13 @@ from database import Database
 async def test_create_site_analysis():
     db = Database()
     mock_conn = AsyncMock()
-    mock_conn.fetchrow = AsyncMock(return_value={"id": 42})
+    mock_conn.fetchrow = AsyncMock(
+        side_effect=[
+            None,  # pas de site existant
+            {"id": 42},
+        ]
+    )
+    mock_conn.execute = AsyncMock()
     mock_pool = MagicMock()
     mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
     mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -24,7 +30,33 @@ async def test_create_site_analysis():
 
     site_id = await db.create_site_analysis("https://example.com", "pending")
     assert site_id == 42
-    mock_conn.fetchrow.assert_awaited_once()
+    assert mock_conn.fetchrow.await_count == 2
+
+
+def test_merge_rss_feeds_dedupes_urls(monkeypatch):
+    import utils.feeds as feeds_mod
+
+    monkeypatch.setattr(
+        feeds_mod,
+        "collapse_equivalent_feeds",
+        lambda feeds, **kwargs: list(feeds),
+    )
+    # re-import path used inside merge
+    monkeypatch.setattr(
+        "utils.collapse_equivalent_feeds",
+        lambda feeds, **kwargs: list(feeds),
+    )
+
+    existing = [{"url": "https://example.com/rss", "title": "A"}]
+    new = [
+        {"url": "http://example.com/rss/", "title": "B"},
+        {"url": "https://example.com/atom", "title": "C"},
+    ]
+    merged = Database.merge_rss_feeds(existing, new)
+    urls = {f["url"] for f in merged}
+    assert "https://example.com/rss" in urls
+    assert "https://example.com/atom" in urls
+    assert len(merged) == 2
 
 
 @pytest.mark.asyncio
@@ -51,7 +83,7 @@ async def test_add_page_analysis_serializes_feeds():
 async def test_cleanup_old_analyses_returns_count():
     db = Database()
     mock_conn = AsyncMock()
-    mock_conn.execute = AsyncMock(side_effect=["DELETE 3", "DELETE 2"])
+    mock_conn.execute = AsyncMock(side_effect=["DELETE 3", "DELETE 2", "DELETE 2"])
 
     mock_tx = MagicMock()
     mock_tx.__aenter__ = AsyncMock(return_value=None)
@@ -65,4 +97,4 @@ async def test_cleanup_old_analyses_returns_count():
 
     deleted = await db.cleanup_old_analyses(30)
     assert deleted == 2
-    assert mock_conn.execute.await_count == 2
+    assert mock_conn.execute.await_count == 3

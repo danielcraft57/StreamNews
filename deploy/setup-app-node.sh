@@ -7,7 +7,7 @@ set -euo pipefail
 APP_DIR="${DEPLOY_PATH:-/opt/streamnews}"
 APP_USER="${DEPLOY_APP_USER:-streamnews}"
 REPO_URL="${REPO_URL:-https://github.com/loupix57/StreamNews.git}"
-DEPLOY_BRANCH="${DEPLOY_BRANCH:-feature/native-cicd-vps}"
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 DATA_HOST="${DATA_HOST:-node6.lan}"
 PG_PASSWORD="${POSTGRES_PASSWORD:-streamnews123}"
 

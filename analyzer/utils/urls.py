@@ -53,6 +53,32 @@ def normalize_url(url: Optional[str]) -> str:
     return urlunparse((scheme, netloc, path, "", query, ""))
 
 
+def site_domain(url: Optional[str]) -> str:
+    """Domaine canonique d'un site (sans www), pour unicite en base.
+
+    Ex: https://www.bfmtv.com/actu -> bfmtv.com
+    """
+    if not url:
+        return ""
+    raw = str(url).strip()
+    if not raw:
+        return ""
+    if "://" not in raw:
+        raw = "https://" + raw
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return ""
+    host = (parsed.netloc or parsed.path.split("/")[0] or "").lower()
+    if "@" in host:
+        host = host.split("@", 1)[-1]
+    if ":" in host:
+        host = host.split(":", 1)[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
 def normalize_identifier(value: Optional[str]) -> Optional[str]:
     """Normalise un guid / id d'article (souvent une URL WordPress ?p=)."""
     if value is None:

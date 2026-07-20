@@ -1,4 +1,4 @@
-from utils.urls import article_dedupe_key, normalize_identifier, normalize_url
+from utils.urls import article_dedupe_key, normalize_identifier, normalize_url, site_domain
 
 
 def test_normalize_url_http_https_and_slash():
@@ -28,3 +28,10 @@ def test_article_dedupe_key_prefers_guid():
 
 def test_normalize_identifier_url():
     assert normalize_identifier("http://x.com/?p=1") == "https://x.com/?p=1"
+
+
+def test_site_domain_strips_www_and_path():
+    assert site_domain("https://www.bfmtv.com/actu/") == "bfmtv.com"
+    assert site_domain("http://BFMTV.com") == "bfmtv.com"
+    assert site_domain("bfmtv.com/foo") == "bfmtv.com"
+    assert site_domain("") == ""

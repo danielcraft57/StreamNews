@@ -141,12 +141,16 @@ async def _crawl_and_persist(site_id: int, url: str, max_pages: int, depth: int)
     status = result.status
     if await should_cancel():
         status = "cancelled"
+    # merge_feeds=True : ajoute aux feeds deja en base (relance meme domaine)
     await db.update_site_status(
-        site_id, status, feeds, result.total_pages_analyzed
+        site_id, status, feeds, result.total_pages_analyzed, merge_feeds=True
     )
+    # Pour l'ingest : recharger la liste fusionnee
+    site = await db.get_site(site_id)
+    merged = (site or {}).get("rss_feeds") or feeds
     return {
         "status": status,
-        "rss_feeds": feeds,
+        "rss_feeds": merged,
         "total_pages_analyzed": result.total_pages_analyzed,
         "error": result.error,
     }

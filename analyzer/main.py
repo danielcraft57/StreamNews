@@ -49,12 +49,30 @@ async def analyze_site(request: SiteAnalysisRequest):
         # Validation de l'URL
         if not request.url.startswith(('http://', 'https://')):
             raise HTTPException(status_code=400, detail="URL invalide")
-        
-        # Création de l'entrée en base
-        site_id = await db.create_site_analysis(request.url, "pending")
+
+        upsert = await db.upsert_site_for_analysis(request.url, "pending")
+        site_id = upsert["site_id"]
+
+        # Relance sur le meme domaine : stoppe l'ancienne tache si encore active
+        old_task = upsert.get("old_task_id")
+        if upsert.get("reused") and old_task and upsert.get("old_status") in (
+            "pending", "analyzing", "ingest_scheduled", "cancelling",
+        ):
+            try:
+                celery_app.control.revoke(old_task, terminate=True, signal="SIGTERM")
+                logger.info(
+                    "Revoke ancienne tache %s pour domaine %s",
+                    old_task,
+                    upsert.get("domain"),
+                )
+            except Exception as exc:
+                logger.warning("revoke old task failed: %s", exc)
+
         logger.info(
-            "Analyze queued site_id=%s url=%s max_pages=%s depth=%s",
+            "Analyze queued site_id=%s reused=%s domain=%s url=%s max_pages=%s depth=%s",
             site_id,
+            upsert.get("reused"),
+            upsert.get("domain"),
             request.url,
             request.max_pages,
             request.depth,
@@ -65,15 +83,18 @@ async def analyze_site(request: SiteAnalysisRequest):
         )
         await db.set_celery_task_id(site_id, async_result.id)
         logger.info("Celery task_id=%s site_id=%s", async_result.id, site_id)
-        
+
+        site = await db.get_site(site_id)
         return AnalysisResult(
             site_id=site_id,
             url=request.url,
             status="pending",
-            rss_feeds=[],
-            total_pages_analyzed=0
+            rss_feeds=(site or {}).get("rss_feeds") or [],
+            total_pages_analyzed=(site or {}).get("total_pages_analyzed") or 0,
         )
-    
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("analyze failed url=%s", request.url)
         raise HTTPException(status_code=500, detail=str(e))

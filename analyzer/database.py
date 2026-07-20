@@ -76,7 +76,8 @@ class Database:
                     site_title VARCHAR(500),
                     favicon_url VARCHAR(1000),
                     meta_description TEXT,
-                    meta_extra JSONB DEFAULT '{}'::jsonb
+                    meta_extra JSONB DEFAULT '{}'::jsonb,
+                    domain VARCHAR(255)
                 )
             """)
             await conn.execute("""
@@ -98,6 +99,10 @@ class Database:
             await conn.execute("""
                 ALTER TABLE sites
                 ADD COLUMN IF NOT EXISTS meta_extra JSONB DEFAULT '{}'::jsonb
+            """)
+            await conn.execute("""
+                ALTER TABLE sites
+                ADD COLUMN IF NOT EXISTS domain VARCHAR(255)
             """)
 
             await conn.execute("""
@@ -196,21 +201,214 @@ class Database:
         # Backfill dedupe une seule fois par process (evite de rescanner a chaque tache)
         if not getattr(self, "_dedupe_ensured", False):
             deleted = await self.ensure_article_dedupe()
+            dup_sites = await self.ensure_site_domain_unique()
             self._dedupe_ensured = True
-            if deleted:
+            if deleted or dup_sites:
                 import logging
                 logging.getLogger(__name__).info(
-                    "Dedupe articles: %s doublons supprimes", deleted
+                    "Dedupe: %s articles, %s sites fusionnes", deleted, dup_sites
                 )
 
-    async def create_site_analysis(self, url: str, status: str = "pending") -> int:
-        """Crée une nouvelle analyse de site"""
+    @staticmethod
+    def merge_rss_feeds(existing: List[Dict], new: List[Dict]) -> List[Dict]:
+        """Ajoute les nouveaux feeds aux existants (dedup URL + equivalents RSS/Atom)."""
+        from utils import collapse_equivalent_feeds, normalize_url
+
+        by_url: Dict[str, Dict] = {}
+        for feed in list(existing or []) + list(new or []):
+            if not isinstance(feed, dict):
+                continue
+            raw = (feed.get("url") or "").strip()
+            if not raw:
+                continue
+            key = normalize_url(raw) or raw
+            prev = by_url.get(key)
+            if not prev:
+                item = dict(feed)
+                item["url"] = key
+                by_url[key] = item
+                continue
+            # Garde le titre / type le plus informatif
+            if not prev.get("title") and feed.get("title"):
+                prev["title"] = feed["title"]
+            if not prev.get("type") and feed.get("type"):
+                prev["type"] = feed["type"]
+            if not prev.get("source_page") and feed.get("source_page"):
+                prev["source_page"] = feed["source_page"]
+        merged = list(by_url.values())
+        try:
+            return collapse_equivalent_feeds(merged)
+        except Exception:
+            return merged
+
+    async def ensure_site_domain_unique(self) -> int:
+        """Backfill domain, fusionne les doublons (ex: 2x BFM), UNIQUE domain."""
+        from utils import site_domain
+        from collections import defaultdict
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "ALTER TABLE sites ADD COLUMN IF NOT EXISTS domain VARCHAR(255)"
+            )
+            rows = await conn.fetch(
+                "SELECT id, url, domain, rss_feeds FROM sites ORDER BY id ASC"
+            )
+            groups = defaultdict(list)
+            for row in rows:
+                domain = (row["domain"] or site_domain(row["url"]) or "").strip() or None
+                if domain and domain != row["domain"]:
+                    await conn.execute(
+                        "UPDATE sites SET domain = $1 WHERE id = $2",
+                        domain,
+                        row["id"],
+                    )
+                key = domain or f"__orphan_{row['id']}"
+                groups[key].append(
+                    {
+                        "id": row["id"],
+                        "domain": domain,
+                        "rss_feeds": self._parse_json_field(row["rss_feeds"]),
+                    }
+                )
+
+            deleted = 0
+            for key, items in groups.items():
+                if key.startswith("__orphan_"):
+                    continue
+                keep = items[0]
+                feeds: List[Dict] = []
+                for item in items:
+                    raw = item.get("rss_feeds") or []
+                    if isinstance(raw, list):
+                        feeds.extend(raw)
+                feeds = self.merge_rss_feeds([], feeds)
+
+                for dup in items[1:]:
+                    # Deplace les articles non deja presents sur le site garde
+                    await conn.execute(
+                        """
+                        UPDATE articles AS a
+                        SET site_id = $1
+                        WHERE a.site_id = $2
+                          AND NOT EXISTS (
+                            SELECT 1 FROM articles a2
+                            WHERE a2.site_id = $1
+                              AND a2.dedupe_key = a.dedupe_key
+                              AND a.dedupe_key <> ''
+                          )
+                          AND NOT EXISTS (
+                            SELECT 1 FROM articles a2
+                            WHERE a2.site_id = $1
+                              AND a2.link = a.link
+                          )
+                        """,
+                        keep["id"],
+                        dup["id"],
+                    )
+                    await conn.execute(
+                        "DELETE FROM sites WHERE id = $1", dup["id"]
+                    )
+                    deleted += 1
+
+                await conn.execute(
+                    """
+                    UPDATE sites
+                    SET domain = $1,
+                        rss_feeds = $2::jsonb,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = $3
+                    """,
+                    keep["domain"] or key,
+                    json.dumps(feeds),
+                    keep["id"],
+                )
+
+            await conn.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'sites_domain_key'
+                    ) THEN
+                        ALTER TABLE sites
+                            ADD CONSTRAINT sites_domain_key UNIQUE (domain);
+                    END IF;
+                EXCEPTION WHEN others THEN
+                    NULL;
+                END $$;
+            """)
+            return deleted
+
+    async def get_site_by_domain(self, domain: str) -> Optional[Dict]:
+        if not domain:
+            return None
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
-                "INSERT INTO sites (url, status) VALUES ($1, $2) RETURNING id",
-                url, status
+                "SELECT * FROM sites WHERE domain = $1", domain
             )
-            return row['id']
+            if row:
+                return self._row_to_dict(row)
+            return None
+
+    async def upsert_site_for_analysis(
+        self, url: str, status: str = "pending"
+    ) -> Dict[str, Any]:
+        """Cree ou reutilise un site par domaine. Les feeds existants sont conserves."""
+        from utils import site_domain
+
+        domain = site_domain(url)
+        if not domain:
+            raise ValueError("URL invalide (domaine introuvable)")
+
+        async with self.pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                "SELECT id, celery_task_id, status FROM sites WHERE domain = $1",
+                domain,
+            )
+            if existing:
+                await conn.execute(
+                    """
+                    UPDATE sites SET
+                        url = $1,
+                        status = $2,
+                        celery_task_id = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = $3
+                    """,
+                    url[:500],
+                    status,
+                    existing["id"],
+                )
+                return {
+                    "site_id": existing["id"],
+                    "reused": True,
+                    "domain": domain,
+                    "old_task_id": existing["celery_task_id"],
+                    "old_status": existing["status"],
+                }
+
+            row = await conn.fetchrow(
+                """
+                INSERT INTO sites (url, status, domain)
+                VALUES ($1, $2, $3)
+                RETURNING id
+                """,
+                url[:500],
+                status,
+                domain,
+            )
+            return {
+                "site_id": row["id"],
+                "reused": False,
+                "domain": domain,
+                "old_task_id": None,
+                "old_status": None,
+            }
+
+    async def create_site_analysis(self, url: str, status: str = "pending") -> int:
+        """Compat : upsert par domaine, retourne l'id."""
+        result = await self.upsert_site_for_analysis(url, status)
+        return result["site_id"]
 
     async def set_celery_task_id(self, site_id: int, task_id: Optional[str]) -> None:
         async with self.pool.acquire() as conn:
@@ -227,13 +425,31 @@ class Database:
             )
             return status in ("cancelled", "cancelling")
 
-    async def update_site_status(self, site_id: int, status: str, rss_feeds: List[Dict] = None, total_pages: int = 0):
-        """Met à jour le statut d'un site"""
+    async def update_site_status(
+        self,
+        site_id: int,
+        status: str,
+        rss_feeds: List[Dict] = None,
+        total_pages: int = 0,
+        merge_feeds: bool = True,
+    ):
+        """Met a jour le statut ; les feeds sont fusionnes avec l'existant par defaut."""
         async with self.pool.acquire() as conn:
             if rss_feeds is not None:
+                feeds = rss_feeds
+                if merge_feeds:
+                    row = await conn.fetchrow(
+                        "SELECT rss_feeds FROM sites WHERE id = $1", site_id
+                    )
+                    existing = (
+                        self._parse_json_field(row["rss_feeds"]) if row else []
+                    )
+                    if not isinstance(existing, list):
+                        existing = []
+                    feeds = self.merge_rss_feeds(existing, rss_feeds)
                 await conn.execute(
                     "UPDATE sites SET status = $1, rss_feeds = $2::jsonb, total_pages_analyzed = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4",
-                    status, json.dumps(rss_feeds), total_pages, site_id
+                    status, json.dumps(feeds), total_pages, site_id
                 )
             else:
                 await conn.execute(

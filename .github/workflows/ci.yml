@@ -10,6 +10,22 @@ on:
 jobs:
   python:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: streamnews
+          POSTGRES_PASSWORD: streamnews123
+          POSTGRES_DB: streamnews
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U streamnews -d streamnews"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://streamnews:streamnews123@localhost:5432/streamnews
     defaults:
       run:
         working-directory: analyzer
@@ -27,7 +43,9 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
       - name: Run unit tests
-        run: pytest -q
+        run: pytest -q -m "not integration"
+      - name: Run integration tests (Postgres)
+        run: pytest -q -m integration
 
   node:
     runs-on: ubuntu-latest
