@@ -81,7 +81,9 @@ async def test_update_site_status_merges_feeds():
     db = Database()
     mock_conn = AsyncMock()
     existing = [{"url": "https://bfmtv.com/rss", "title": "RSS"}]
-    mock_conn.fetchrow = AsyncMock(return_value={"rss_feeds": json.dumps(existing)})
+    mock_conn.fetchrow = AsyncMock(
+        side_effect=[{"rss_feeds": json.dumps(existing)}, None]
+    )
     mock_conn.execute = AsyncMock()
     db.pool = _mock_pool(mock_conn)
 
@@ -99,13 +101,14 @@ async def test_update_site_status_merges_feeds():
 async def test_update_site_status_can_replace_feeds():
     db = Database()
     mock_conn = AsyncMock()
+    mock_conn.fetchrow = AsyncMock(return_value=None)
     mock_conn.execute = AsyncMock()
     db.pool = _mock_pool(mock_conn)
 
     feeds = [{"url": "https://example.com/only", "title": "Only"}]
     await db.update_site_status(1, "completed", feeds, 5, merge_feeds=False)
 
-    mock_conn.fetchrow.assert_not_awaited()
+    mock_conn.fetchrow.assert_awaited_once()
     stored = json.loads(mock_conn.execute.await_args.args[2])
     assert len(stored) == 1
 

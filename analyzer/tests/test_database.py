@@ -66,6 +66,7 @@ def test_merge_rss_feeds_dedupes_urls(monkeypatch):
 async def test_add_page_analysis_serializes_feeds():
     db = Database()
     mock_conn = AsyncMock()
+    mock_conn.fetchrow = AsyncMock(return_value=None)
     mock_conn.execute = AsyncMock()
     mock_pool = MagicMock()
     mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)

@@ -402,6 +402,15 @@ class Database:
                     "UPDATE sites SET status = $1, rss_feeds = $2, total_pages_analyzed = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4",
                     status, json.dumps(feeds), total_pages, site_id
                 )
+                from repositories.normalized_sync import has_normalized_tables, sync_rss_feeds_list
+
+                if await has_normalized_tables(conn, is_sqlite=self.is_sqlite):
+                    await sync_rss_feeds_list(
+                        conn,
+                        is_sqlite=self.is_sqlite,
+                        site_id=site_id,
+                        feeds=feeds,
+                    )
             else:
                 await conn.execute(
                     "UPDATE sites SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
@@ -471,6 +480,22 @@ class Database:
                 "INSERT INTO pages (site_id, url, title, rss_feeds) VALUES ($1, $2, $3, $4)",
                 site_id, url, title, json.dumps(rss_feeds or [])
             )
+            from repositories.normalized_sync import has_normalized_tables, sync_rss_feeds_list
+
+            if await has_normalized_tables(conn, is_sqlite=self.is_sqlite):
+                page = await conn.fetchrow(
+                    "SELECT id FROM pages WHERE site_id = $1 AND url = $2 ORDER BY id DESC LIMIT 1",
+                    site_id,
+                    url,
+                )
+                page_id = int(page["id"]) if page else None
+                await sync_rss_feeds_list(
+                    conn,
+                    is_sqlite=self.is_sqlite,
+                    site_id=site_id,
+                    feeds=rss_feeds or [],
+                    source_page_id=page_id,
+                )
 
     async def get_site(self, site_id: int) -> Optional[Dict]:
         """Récupère les détails d'un site"""
@@ -642,7 +667,13 @@ class Database:
             meta["analysis_status"] = "pending"
             meta["analysis_error"] = None
             await conn.execute(
-                "UPDATE articles SET article_meta = $2 WHERE id = $1",
+                """
+                UPDATE articles SET
+                    article_meta = $2,
+                    analysis_status = 'pending',
+                    analysis_error = NULL
+                WHERE id = $1
+                """,
                 article_id,
                 json.dumps(meta),
             )
@@ -676,10 +707,32 @@ class Database:
             if analyzed_at:
                 meta["analyzed_at"] = analyzed_at
             await conn.execute(
-                "UPDATE articles SET article_meta = $2 WHERE id = $1",
+                """
+                UPDATE articles SET
+                    article_meta = $2,
+                    analysis_status = $3,
+                    analysis_error = $4,
+                    analyzed_at = COALESCE($5, analyzed_at)
+                WHERE id = $1
+                """,
                 article_id,
                 json.dumps(meta),
+                analysis_status,
+                analysis_error,
+                analyzed_at,
             )
+            from repositories.normalized_sync import has_normalized_tables, sync_article_after_analysis
+
+            if await has_normalized_tables(conn, is_sqlite=self.is_sqlite):
+                await sync_article_after_analysis(
+                    conn,
+                    is_sqlite=self.is_sqlite,
+                    article_id=article_id,
+                    meta=meta,
+                    analysis_status=analysis_status,
+                    analysis_error=analysis_error,
+                    analyzed_at=analyzed_at or meta.get("analyzed_at"),
+                )
 
     async def set_article_enrich_pending(self, article_id: int) -> None:
         async with self.pool.acquire() as conn:
@@ -732,6 +785,27 @@ class Database:
                 ((title or "")[:1000] or None) if title is not None else None,
                 ((author or "")[:500] or None) if author is not None else None,
             )
+            from repositories.normalized_sync import has_normalized_tables, sync_article_after_enrichment
+
+            if await has_normalized_tables(conn, is_sqlite=self.is_sqlite):
+                row = await conn.fetchrow(
+                    "SELECT images, article_meta FROM articles WHERE id = $1",
+                    article_id,
+                )
+                if row:
+                    images_final = self._parse_json_field(row["images"])
+                    meta_final = self._parse_json_field(row["article_meta"])
+                    if not isinstance(images_final, list):
+                        images_final = []
+                    if not isinstance(meta_final, dict):
+                        meta_final = {}
+                    await sync_article_after_enrichment(
+                        conn,
+                        is_sqlite=self.is_sqlite,
+                        article_id=article_id,
+                        images=images_final,
+                        meta=meta_final,
+                    )
 
     async def upsert_article(
         self,
@@ -828,6 +902,33 @@ class Database:
                 images_json,
                 meta_json,
             )
+            from repositories.normalized_sync import has_normalized_tables, sync_article_after_upsert
+
+            if await has_normalized_tables(conn, is_sqlite=self.is_sqlite):
+                art = await conn.fetchrow(
+                    """
+                    SELECT id, images, article_meta FROM articles
+                    WHERE site_id = $1 AND dedupe_key = $2
+                    """,
+                    site_id,
+                    key[:2100],
+                )
+                if art:
+                    images_final = self._parse_json_field(art["images"])
+                    meta_final = self._parse_json_field(art["article_meta"])
+                    if not isinstance(images_final, list):
+                        images_final = []
+                    if not isinstance(meta_final, dict):
+                        meta_final = {}
+                    await sync_article_after_upsert(
+                        conn,
+                        is_sqlite=self.is_sqlite,
+                        site_id=site_id,
+                        article_id=int(art["id"]),
+                        feed_url=feed_n,
+                        images=images_final,
+                        meta=meta_final,
+                    )
             return True
 
     async def ensure_article_dedupe(self) -> int:
