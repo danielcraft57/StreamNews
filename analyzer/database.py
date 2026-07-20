@@ -112,6 +112,12 @@ class Database:
                         seen.add(label.lower())
                         kws.append(label)
                 out["keywords"] = kws[:30]
+            elif key == "analysis":
+                merged_analysis = dict(out.get("analysis") or {})
+                for tool_name, block in (val or {}).items():
+                    if isinstance(block, dict):
+                        merged_analysis[tool_name] = block
+                out["analysis"] = merged_analysis
             elif key not in out or out.get(key) in (None, "", []):
                 out[key] = val
         return out
@@ -813,6 +819,105 @@ class Database:
                 limit,
             )
             return [self._row_to_dict(row) for row in rows]
+
+    async def list_articles_needing_analysis(
+        self, site_id: int, limit: int = 50
+    ) -> List[Dict]:
+        """Articles enrichis sans analyse texte ok."""
+        order = (
+            "ORDER BY enriched_at DESC, fetched_at DESC"
+            if self.is_sqlite
+            else "ORDER BY enriched_at DESC NULLS LAST, fetched_at DESC"
+        )
+        async with self.pool.acquire() as conn:
+            if self.is_sqlite:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT id, link, enrich_status, article_meta
+                    FROM articles
+                    WHERE site_id = $1
+                      AND enrich_status = 'ok'
+                      AND COALESCE(content_text, '') != ''
+                      AND (
+                        article_meta IS NULL
+                        OR json_extract(article_meta, '$.analysis_status') IS NULL
+                        OR json_extract(article_meta, '$.analysis_status') NOT IN ('ok', 'pending')
+                      )
+                    {order}
+                    LIMIT $2
+                    """,
+                    site_id,
+                    limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT id, link, enrich_status, article_meta
+                    FROM articles
+                    WHERE site_id = $1
+                      AND enrich_status = 'ok'
+                      AND COALESCE(content_text, '') <> ''
+                      AND (
+                        article_meta IS NULL
+                        OR COALESCE(article_meta->>'analysis_status', '') NOT IN ('ok', 'pending')
+                      )
+                    {order}
+                    LIMIT $2
+                    """,
+                    site_id,
+                    limit,
+                )
+            return [self._row_to_dict(row) for row in rows]
+
+    async def set_article_analysis_pending(self, article_id: int) -> None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT article_meta FROM articles WHERE id = $1",
+                article_id,
+            )
+            meta = self._parse_json_field(row["article_meta"]) if row else {}
+            meta = meta if isinstance(meta, dict) else {}
+            meta["analysis_status"] = "pending"
+            meta["analysis_error"] = None
+            await conn.execute(
+                "UPDATE articles SET article_meta = $2 WHERE id = $1",
+                article_id,
+                json.dumps(meta),
+            )
+
+    async def update_article_analysis(
+        self,
+        article_id: int,
+        *,
+        analysis: Optional[Dict] = None,
+        analysis_status: str = "ok",
+        analysis_error: Optional[str] = None,
+        analyzed_at: Optional[str] = None,
+    ) -> None:
+        """Persiste les resultats d'analyse texte dans article_meta."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT article_meta FROM articles WHERE id = $1",
+                article_id,
+            )
+            meta = self._parse_json_field(row["article_meta"]) if row else {}
+            meta = meta if isinstance(meta, dict) else {}
+            if analysis is not None:
+                existing_analysis = meta.get("analysis") or {}
+                merged_analysis = dict(existing_analysis)
+                for tool_name, block in analysis.items():
+                    if isinstance(block, dict):
+                        merged_analysis[tool_name] = block
+                meta["analysis"] = merged_analysis
+            meta["analysis_status"] = analysis_status
+            meta["analysis_error"] = analysis_error
+            if analyzed_at:
+                meta["analyzed_at"] = analyzed_at
+            await conn.execute(
+                "UPDATE articles SET article_meta = $2 WHERE id = $1",
+                article_id,
+                json.dumps(meta),
+            )
 
     async def set_article_enrich_pending(self, article_id: int) -> None:
         async with self.pool.acquire() as conn:

@@ -49,8 +49,9 @@ def test_extract_prefers_jsonld_title_and_author():
 def test_extract_collects_images_from_meta():
     result = extract_from_html(SAMPLE_HTML, "https://example.com/news/1")
     urls = [img["url"] for img in result["images"]]
-    assert "https://example.com/photo.jpg" in urls
     assert "https://example.com/hero.jpg" in urls
+    assert result["images"][0].get("primary") is True
+    assert result["article_meta"].get("primary_image") == "https://example.com/hero.jpg"
 
 
 def test_extract_has_content_text_or_html():
@@ -96,3 +97,17 @@ def test_extract_dublin_core():
     assert meta.get("title") == "DC Title"
     assert meta.get("author") == "Bob"
     assert "dublin-core" in (meta.get("sources") or [])
+
+
+def test_extract_strips_links_from_body():
+    html = """<!DOCTYPE html><html><body><article>
+    <p>Debut article avec <a href="https://spam.example/track">lien promo</a> au milieu.</p>
+    <p>Suite https://example.com/raw-url dans le texte.</p>
+    </article></body></html>"""
+    result = extract_from_html(html, "https://example.com/news/links")
+    text = result.get("content_text") or ""
+    html_out = result.get("content_html") or ""
+    assert "lien promo" in text or "lien promo" in html_out
+    assert "https://spam.example" not in text
+    assert "https://example.com/raw-url" not in text
+    assert "<a" not in html_out.lower()

@@ -31,7 +31,8 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "Install pinne echoue (Windows + Python 3.13)."
     Write-Host "Mode local SQLite: deps essentielles sans versions figees..."
     & $Pip install aiosqlite fastapi uvicorn requests beautifulsoup4 lxml feedparser `
-        redis celery aiohttp urllib3 pydantic sqlalchemy alembic python-multipart trafilatura bleach watchdog
+        redis celery aiohttp urllib3 pydantic sqlalchemy alembic python-multipart trafilatura bleach watchdog `
+        langdetect yake simhash sumy nltk spacy
     if ($LASTEXITCODE -ne 0) { throw "Echec installation des dependances Python." }
 }
 

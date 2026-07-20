@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
@@ -13,9 +14,12 @@ from database import Database
 from rss_analyzer import RSSAnalyzer
 from celery_worker import (
     analyze_site_task,
+    analyze_article_task,
+    analyze_site_articles_task,
     enrich_article_task,
     enrich_site_articles_task,
 )
+from services.text_analysis_service import available_analyzers
 from celery_app import celery_app
 
 app = FastAPI(title="StreamNews Analyzer", version="0.2.0")
@@ -290,6 +294,75 @@ async def enrich_site_articles(site_id: int, limit: int = 50):
             limit,
             async_result.id,
         )
+        return {
+            "site_id": site_id,
+            "status": "queued",
+            "limit": limit,
+            "task_id": async_result.id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/text-analysis/analyzers")
+async def list_text_analyzers():
+    """Liste les outils d'analyse texte et leur disponibilite."""
+    return {"analyzers": available_analyzers()}
+
+@app.post("/articles/{article_id}/analyze")
+async def analyze_article(
+    article_id: int,
+    force: bool = False,
+    tools: Optional[str] = None,
+):
+    """Enqueue l'analyse texte d'un article (tous les outils ou une liste comma-separee)."""
+    try:
+        article = await db.get_article(article_id)
+        if not article:
+            raise HTTPException(status_code=404, detail="Article non trouvé")
+
+        if article.get("enrich_status") != "ok":
+            raise HTTPException(
+                status_code=400,
+                detail="Article non enrichi (lancer enrich d'abord)",
+            )
+
+        meta = article.get("article_meta") or {}
+        tool_list = [t.strip() for t in tools.split(",") if t.strip()] if tools else None
+        if meta.get("analysis_status") == "ok" and not force and not tool_list:
+            return {
+                "article_id": article_id,
+                "site_id": article.get("site_id"),
+                "status": "ok",
+                "queued": False,
+                "message": "Deja analyse",
+            }
+
+        await db.set_article_analysis_pending(article_id)
+        async_result = analyze_article_task.delay(article_id, force, tool_list)
+        return {
+            "article_id": article_id,
+            "site_id": article.get("site_id"),
+            "status": "pending",
+            "queued": True,
+            "task_id": async_result.id,
+            "tools": tool_list,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/sites/{site_id}/analyze-articles")
+async def analyze_site_articles(site_id: int, limit: int = 50):
+    """Enqueue l'analyse texte des articles enrichis d'un site."""
+    try:
+        site = await db.get_site(site_id)
+        if not site:
+            raise HTTPException(status_code=404, detail="Site non trouvé")
+        limit = max(1, min(limit, 200))
+        async_result = analyze_site_articles_task.delay(site_id, limit)
         return {
             "site_id": site_id,
             "status": "queued",

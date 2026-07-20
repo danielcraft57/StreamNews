@@ -13,6 +13,12 @@ import trafilatura
 from bs4 import BeautifulSoup
 
 from logging_config import get_logger
+from text_analysis.clean import strip_links_from_html
+from utils.image_urls import (
+    build_images_list,
+    pick_primary_image,
+    strip_primary_image_from_html,
+), strip_urls_from_text
 
 logger = get_logger(__name__)
 
@@ -33,7 +39,7 @@ _ARTICLE_TYPES = {
 
 _ALLOWED_TAGS = [
     "p", "br", "h1", "h2", "h3", "h4", "h5", "h6",
-    "ul", "ol", "li", "a", "strong", "em", "b", "i",
+    "ul", "ol", "li", "strong", "em", "b", "i",
     "blockquote", "img", "figure", "figcaption",
     "span", "div", "pre", "code", "hr", "table",
     "thead", "tbody", "tr", "th", "td",
@@ -436,13 +442,14 @@ def _merge_meta(*parts: Dict[str, Any]) -> Dict[str, Any]:
 def _sanitize_html(html: Optional[str]) -> str:
     if not html:
         return ""
-    return bleach.clean(
+    cleaned = bleach.clean(
         html,
         tags=_ALLOWED_TAGS,
         attributes=_ALLOWED_ATTRS,
         protocols=["http", "https", "mailto"],
         strip=True,
     )
+    return strip_links_from_html(cleaned)
 
 
 def _images_from_html(html: str, base_url: str, limit: int = 12) -> List[Dict[str, str]]:
@@ -504,7 +511,7 @@ def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
             include_comments=False,
             include_tables=True,
             include_images=True,
-            include_links=True,
+            include_links=False,
             output_format="html",
             favor_recall=True,
         )
@@ -522,12 +529,12 @@ def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
             favor_recall=True,
         )
         if text:
-            content_text = text.strip()
+            content_text = strip_urls_from_text(text.strip())
     except Exception as exc:
         logger.warning("trafilatura text failed for %s: %s", page_url, exc)
 
     if not content_text and merged.get("article_body"):
-        content_text = str(merged["article_body"]).strip()
+        content_text = strip_urls_from_text(str(merged["article_body"]).strip())
         if not content_html:
             content_html = _sanitize_html(
                 "<p>" + bleach.clean(content_text, tags=[], strip=True) + "</p>"
@@ -541,16 +548,27 @@ def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
 
     images: List[Dict[str, str]] = []
     seen = set()
+    meta_urls: List[str] = []
     for url in merged.get("images") or []:
         if url in seen:
             continue
         seen.add(url)
-        images.append({"url": url, "alt": "", "source": "meta"})
-    for img in _images_from_html(content_html, base_url):
-        if img["url"] in seen:
-            continue
-        seen.add(img["url"])
-        images.append(img)
+        meta_urls.append(url)
+
+    content_imgs = _images_from_html(content_html, base_url)
+    og_img = _meta_content(soup, "og:image")
+    tw_img = _meta_content(soup, "twitter:image")
+    primary = pick_primary_image(
+        og_url=og_img,
+        twitter_url=tw_img,
+        meta_urls=meta_urls,
+        content_images=content_imgs,
+        base_url=base_url,
+    )
+    images = build_images_list(primary, meta_urls, content_imgs)
+
+    if primary and content_html:
+        content_html = strip_primary_image_from_html(content_html, primary, base_url)
 
     article_meta = {
         k: v
@@ -560,6 +578,8 @@ def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
     article_meta["page_url"] = page_url
     if urlparse(page_url).netloc:
         article_meta["domain"] = urlparse(page_url).netloc.lower()
+    if primary and primary.get("url"):
+        article_meta["primary_image"] = primary["url"]
     rt = _reading_time_minutes(content_text or merged.get("article_body"))
     if rt:
         article_meta["reading_time_minutes"] = rt

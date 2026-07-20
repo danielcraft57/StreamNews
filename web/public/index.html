@@ -190,26 +190,32 @@
         .article-item {
             cursor: pointer;
             transition: border-color 0.2s ease, background-color 0.2s ease;
-            display: flex;
-            gap: 12px;
-            align-items: flex-start;
+            display: block;
         }
 
-        .article-item-thumb {
-            flex: 0 0 72px;
-            width: 72px;
-            height: 72px;
+        .article-item-hero {
+            margin: 8px 0 10px;
             border-radius: 8px;
-            object-fit: cover;
+            overflow: hidden;
             background: #eef1f5;
         }
 
-        .article-item-thumb.placeholder {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #99a;
-            font-size: 1.4rem;
+        .article-item-hero img {
+            display: block;
+            width: 100%;
+            height: 110px;
+            object-fit: cover;
+        }
+
+        .article-item--no-thumb .article-item-body {
+            padding-left: 0;
+        }
+
+        .article-item-body h4 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
 
         .article-item-body {
@@ -260,6 +266,232 @@
         .article-enrich-badge.pending { background: #fff3cd; color: #856404; }
         .article-enrich-badge.error { background: #f8d7da; color: #721c24; }
 
+        .article-analysis-badge {
+            display: inline-block;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 4px;
+            vertical-align: middle;
+            background: #e8f4f8;
+            color: #0c5460;
+        }
+
+        .article-analysis-badge.ok { background: #cce5ff; color: #004085; }
+        .article-analysis-badge.pending { background: #fff3cd; color: #856404; }
+        .article-analysis-badge.error { background: #f8d7da; color: #721c24; }
+        .article-analysis-badge.skipped { background: #e9ecef; color: #666; }
+
+        .reader-analysis-panel {
+            margin: 0;
+            padding: 16px 18px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #f8f9ff 0%, #f0f7fa 100%);
+            border: 1px solid #dce4f0;
+        }
+
+        .reader-analysis-section {
+            margin: 0 0 20px;
+        }
+
+        .reader-analysis-section > .reader-section-label {
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #5568c9;
+            margin: 0 0 10px;
+        }
+
+        .reader-analysis-panel h4 {
+            margin: 0 0 12px;
+            font-size: 1rem;
+            color: #334;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .reader-analysis-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .reader-analysis-actions {
+            margin-left: auto;
+        }
+
+        .reader-analysis-actions .btn {
+            width: auto;
+            padding: 4px 10px;
+            font-size: 0.75rem;
+            display: inline-block;
+        }
+
+        .reader-header {
+            margin: 0 0 18px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .reader-header h3 {
+            margin: 0 0 8px;
+        }
+
+        .reader-header .reader-meta {
+            margin: 0;
+        }
+
+        .reader-header .reader-hero {
+            width: 100%;
+            margin: 14px 0 0;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #f0f2f5;
+        }
+
+        .reader-header .reader-hero img {
+            display: block;
+            width: 100% !important;
+            max-width: 100% !important;
+            height: auto !important;
+            min-height: 140px;
+            max-height: 380px;
+            object-fit: cover;
+        }
+
+        .reader-analysis-panel.is-loading {
+            color: #666;
+            font-style: italic;
+        }
+
+        .reader-lang-badge {
+            display: inline-block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: #667eea;
+            color: #fff;
+        }
+
+        .reader-analysis-summary {
+            margin: 0 0 14px;
+            padding: 12px 14px;
+            border-left: 3px solid #667eea;
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 0 8px 8px 0;
+            font-size: 0.95rem;
+            line-height: 1.55;
+            color: #333;
+        }
+
+        .reader-analysis-summary p {
+            margin: 0 0 10px;
+        }
+
+        .reader-analysis-summary p:last-child {
+            margin-bottom: 0;
+        }
+
+        .reader-analysis-keywords {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin: 0 0 12px;
+        }
+
+        .reader-analysis-keyword {
+            background: #fff;
+            border: 1px solid #c5d4e8;
+            color: #334;
+            font-size: 0.75rem;
+            padding: 3px 9px;
+            border-radius: 999px;
+        }
+
+        .reader-entities {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin: 0 0 8px;
+        }
+
+        .reader-entity {
+            font-size: 0.72rem;
+            padding: 3px 8px;
+            border-radius: 6px;
+            background: #fff;
+            border: 1px solid #ddd;
+            color: #444;
+        }
+
+        .reader-entity::before {
+            content: attr(data-label);
+            display: inline-block;
+            margin-right: 5px;
+            font-size: 0.62rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            opacity: 0.55;
+        }
+
+        .reader-entity-org { border-color: #b8daff; background: #f0f7ff; }
+        .reader-entity-per { border-color: #f5c6cb; background: #fff5f5; }
+        .reader-entity-loc { border-color: #c3e6cb; background: #f4fff6; }
+        .reader-entity-misc { border-color: #e2e3e5; }
+
+        .reader-analysis-meta {
+            font-size: 0.75rem;
+            color: #777;
+            margin-top: 10px;
+        }
+
+        .reader-analysis-block {
+            margin-top: 12px;
+        }
+
+        .reader-analysis-block:first-of-type {
+            margin-top: 0;
+        }
+
+        .reader-analysis-block strong {
+            display: block;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #667;
+            margin-bottom: 6px;
+        }
+
+        .reader-analysis-empty {
+            color: #666;
+            font-size: 0.9rem;
+            margin: 0;
+        }
+
+        .reader-article-section {
+            margin-top: 0;
+        }
+
+        .reader-article-section > .reader-section-label {
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #889;
+            margin: 0 0 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #eee;
+        }
+
         .reader-hero {
             margin: 0 0 16px;
             border-radius: 10px;
@@ -269,9 +501,21 @@
 
         .reader-hero img {
             display: block;
-            width: 100%;
-            max-height: 320px;
+            width: 100% !important;
+            max-width: 100% !important;
+            height: auto !important;
+            max-height: 380px;
             object-fit: cover;
+        }
+
+        /* Images restantes dans le corps : pleine largeur aussi */
+        .article-reader .reader-body img {
+            display: block;
+            width: 100% !important;
+            max-width: 100% !important;
+            height: auto !important;
+            border-radius: 8px;
+            margin: 12px 0;
         }
 
         .reader-chapo {
@@ -407,13 +651,6 @@
             line-height: 1.65;
             color: #222;
             font-size: 0.98rem;
-        }
-
-        .article-reader .reader-body img {
-            max-width: 100%;
-            height: auto;
-            border-radius: 4px;
-            margin: 8px 0;
         }
 
         .article-reader .reader-body p {

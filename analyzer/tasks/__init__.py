@@ -22,6 +22,7 @@ from models import PipelineSummary
 from services.crawl_service import CrawlService
 from services.enrich_service import enrich_article_url
 from services.ingest_service import IngestService
+from services.text_analysis_service import analyze_article_content
 
 # Worker : s'assurer que logs/worker.log est configure
 if not logging.getLogger().handlers:
@@ -495,6 +496,111 @@ def enrich_site_articles_task(site_id: int, limit: int = 50) -> dict:
         enrich_article_task.delay(art["id"], False)
         queued += 1
     logger.info("enrich_site_articles site_id=%s queued=%s", site_id, queued)
+    return {"site_id": site_id, "queued": queued}
+
+
+@celery_app.task(name="streamnews.analyze_article")
+def analyze_article_task(
+    article_id: int,
+    force: bool = False,
+    tools: Optional[List[str]] = None,
+) -> dict:
+    """Analyse texte d'un article (outils independants)."""
+
+    async def _run_analyze():
+        async def _work(db: Database):
+            article = await db.get_article(article_id)
+            if not article:
+                return {"article_id": article_id, "status": "missing"}
+
+            meta = article.get("article_meta") or {}
+            if meta.get("analysis_status") == "ok" and not force and not tools:
+                return {
+                    "article_id": article_id,
+                    "status": "ok",
+                    "skipped": True,
+                    "site_id": article.get("site_id"),
+                }
+
+            if article.get("enrich_status") != "ok":
+                return {
+                    "article_id": article_id,
+                    "status": "error",
+                    "error": "article non enrichi",
+                    "site_id": article.get("site_id"),
+                }
+
+            await db.set_article_analysis_pending(article_id)
+            try:
+                existing_analysis = (meta.get("analysis") or {}) if isinstance(meta, dict) else {}
+                lang_hint = None
+                lang_block = existing_analysis.get("lang_detect") or {}
+                if isinstance(lang_block, dict) and lang_block.get("lang"):
+                    lang_hint = lang_block["lang"]
+
+                payload = analyze_article_content(
+                    article.get("content_text"),
+                    article.get("content_html"),
+                    only=tools,
+                    lang_hint=lang_hint,
+                    existing_analysis=existing_analysis,
+                )
+                await db.update_article_analysis(
+                    article_id,
+                    analysis=payload.get("analysis"),
+                    analysis_status=payload.get("analysis_status", "error"),
+                    analysis_error=payload.get("analysis_error"),
+                    analyzed_at=payload.get("analyzed_at"),
+                )
+                _send_ws(
+                    {
+                        "type": "article_analyzed",
+                        "article_id": article_id,
+                        "site_id": article.get("site_id"),
+                        "status": payload.get("analysis_status"),
+                    }
+                )
+                return {
+                    "article_id": article_id,
+                    "status": payload.get("analysis_status"),
+                    "site_id": article.get("site_id"),
+                    "tools": list((payload.get("analysis") or {}).keys()),
+                }
+            except Exception as exc:
+                logger.warning("analyze_article failed id=%s: %s", article_id, exc)
+                await db.update_article_analysis(
+                    article_id,
+                    analysis_status="error",
+                    analysis_error=str(exc)[:1000],
+                )
+                return {
+                    "article_id": article_id,
+                    "status": "error",
+                    "error": str(exc),
+                    "site_id": article.get("site_id"),
+                }
+
+        return await _with_db(_work)
+
+    return _run(_run_analyze())
+
+
+@celery_app.task(name="streamnews.analyze_site_articles")
+def analyze_site_articles_task(site_id: int, limit: int = 50) -> dict:
+    """Enqueue l'analyse texte des articles enrichis d'un site."""
+
+    async def _list():
+        async def _work(db: Database):
+            return await db.list_articles_needing_analysis(site_id, limit=limit)
+
+        return await _with_db(_work)
+
+    articles = _run(_list())
+    queued = 0
+    for art in articles:
+        analyze_article_task.delay(art["id"], False)
+        queued += 1
+    logger.info("analyze_site_articles site_id=%s queued=%s", site_id, queued)
     return {"site_id": site_id, "queued": queued}
 
 
