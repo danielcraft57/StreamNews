@@ -24,7 +24,7 @@ for host in $FLEET_HOSTS; do
   if ! ssh -o BatchMode=yes -o ConnectTimeout=15 \
     -o StrictHostKeyChecking=accept-new \
     "${FLEET_USER}@${host}" \
-    "cd '${DEPLOY_PATH}' && bash deploy/deploy.sh"; then
+    "sudo -u streamnews bash -lc 'cd \"${DEPLOY_PATH}\" && bash deploy/deploy.sh'"; then
     echo "ERREUR: deploy failed on $host"
     failed=1
   fi

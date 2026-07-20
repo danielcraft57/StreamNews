@@ -21,8 +21,9 @@ set +a
 ROLE="${STREAMNEWS_ROLE:-all}"
 BRANCH="${DEPLOY_BRANCH:-main}"
 
-git fetch --all --prune
-git reset --hard "origin/${BRANCH}"
+# Repo owned by streamnews, deploy souvent lance en pi -> safe.directory
+git -c "safe.directory=$ROOT" fetch --all --prune
+git -c "safe.directory=$ROOT" reset --hard "origin/${BRANCH}"
 
 case "$ROLE" in
   data)
