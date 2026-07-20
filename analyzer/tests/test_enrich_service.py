@@ -63,3 +63,36 @@ def test_extract_empty_html():
     result = extract_from_html("", "https://example.com/x")
     assert result["content_html"] == ""
     assert result["images"] == []
+
+
+def test_extract_rdfa_and_page_meta():
+    html = """<!DOCTYPE html><html><head>
+    <link rel="canonical" href="https://example.com/news/1">
+    <link rel="icon" href="/favicon.ico">
+    <meta name="keywords" content="foo, bar">
+    <meta property="og:title" content="RDFa OG Title">
+    </head><body>
+    <div typeof="schema:NewsArticle">
+      <span property="schema:headline">RDFa Headline</span>
+    </div>
+    <p>Contenu article avec assez de mots pour une lecture.</p>
+    </body></html>"""
+    result = extract_from_html(html, "https://example.com/news/1")
+    meta = result["article_meta"]
+    assert meta.get("canonical_url") == "https://example.com/news/1"
+    assert "foo" in (meta.get("keywords") or [])
+    assert "rdfa" in (meta.get("sources") or []) or "page-meta" in (meta.get("sources") or [])
+    assert meta.get("favicon_url", "").endswith("/favicon.ico")
+
+
+def test_extract_dublin_core():
+    html = """<!DOCTYPE html><html><head>
+    <meta name="DC.title" content="DC Title">
+    <meta name="DC.creator" content="Bob">
+    <meta name="DC.subject" content="economie">
+    </head><body><p>Texte.</p></body></html>"""
+    result = extract_from_html(html, "https://example.com/dc")
+    meta = result["article_meta"]
+    assert meta.get("title") == "DC Title"
+    assert meta.get("author") == "Bob"
+    assert "dublin-core" in (meta.get("sources") or [])

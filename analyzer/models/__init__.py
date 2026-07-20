@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,8 @@ class ArticleCandidate(BaseModel):
     author: Optional[str] = None
     published_at: Optional[datetime] = None
     guid: Optional[str] = None
+    images: List[Dict[str, Any]] = Field(default_factory=list)
+    article_meta: Dict[str, Any] = Field(default_factory=dict)
 
 
 class CrawlResult(BaseModel):

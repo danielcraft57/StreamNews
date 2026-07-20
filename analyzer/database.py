@@ -18,6 +18,20 @@ class Database:
     def is_sqlite(self) -> bool:
         return self.backend == "sqlite"
 
+    async def close(self):
+        """Ferme le pool (obligatoire sous Celery + aiosqlite avant fin de event loop)."""
+        if self.pool is not None:
+            await self.pool.close()
+            self.pool = None
+
+    async def __aenter__(self):
+        await self.init_db()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.close()
+        return False
+
     @staticmethod
     def _parse_json_field(value: Any):
         """asyncpg renvoie souvent le JSONB en str : on normalise en objet Python."""
@@ -58,6 +72,49 @@ class Database:
             if key in data and data[key] is not None and hasattr(data[key], 'isoformat'):
                 data[key] = data[key].isoformat()
         return data
+
+    @staticmethod
+    def _merge_image_lists(existing: Any, new: Any, limit: int = 20) -> List[Dict]:
+        base = existing if isinstance(existing, list) else []
+        incoming = new if isinstance(new, list) else []
+        out: List[Dict] = []
+        seen = set()
+        for img in base + incoming:
+            if not isinstance(img, dict):
+                continue
+            url = img.get("url")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            out.append(img)
+            if len(out) >= limit:
+                break
+        return out
+
+    @staticmethod
+    def _merge_article_meta_dict(existing: Any, new: Any) -> Dict[str, Any]:
+        base = existing if isinstance(existing, dict) else {}
+        incoming = new if isinstance(new, dict) else {}
+        out = dict(base)
+        for key, val in incoming.items():
+            if key == "sources":
+                srcs = list(out.get("sources") or [])
+                for src in val or []:
+                    if src and src not in srcs:
+                        srcs.append(src)
+                out["sources"] = srcs
+            elif key == "keywords":
+                kws = list(out.get("keywords") or [])
+                seen = {k.lower() for k in kws}
+                for kw in val or []:
+                    label = str(kw).strip()
+                    if label and label.lower() not in seen:
+                        seen.add(label.lower())
+                        kws.append(label)
+                out["keywords"] = kws[:30]
+            elif key not in out or out.get(key) in (None, "", []):
+                out[key] = val
+        return out
 
     async def init_db(self, reset: bool = False):
         """Initialise la connexion et le schema (pas de migrations).
@@ -819,6 +876,8 @@ class Database:
         author: str = None,
         published_at=None,
         guid: str = None,
+        images: Optional[List[Dict]] = None,
+        article_meta: Optional[Dict] = None,
     ) -> bool:
         """Insert/update un article. Dedup sur dedupe_key (guid ou lien normalise)."""
         from utils import article_dedupe_key, normalize_identifier, normalize_url
@@ -831,11 +890,53 @@ class Database:
         feed_n = normalize_url(feed_url) or (feed_url or "")[:1000]
 
         async with self.pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                """
+                SELECT images, article_meta, enrich_status
+                FROM articles
+                WHERE site_id = $1 AND dedupe_key = $2
+                """,
+                site_id,
+                key[:2100],
+            )
+
+            images_json = None
+            meta_json = None
+            if images is not None or article_meta is not None:
+                if existing and existing.get("enrich_status") == "ok":
+                    if images is not None:
+                        images_json = json.dumps(self._parse_json_field(existing["images"]))
+                    if article_meta is not None:
+                        meta_json = json.dumps(
+                            self._merge_article_meta_dict(
+                                self._parse_json_field(existing["article_meta"]), article_meta
+                            )
+                        )
+                elif existing:
+                    if images is not None:
+                        images_json = json.dumps(
+                            self._merge_image_lists(
+                                self._parse_json_field(existing["images"]), images
+                            )
+                        )
+                    if article_meta is not None:
+                        meta_json = json.dumps(
+                            self._merge_article_meta_dict(
+                                self._parse_json_field(existing["article_meta"]), article_meta
+                            )
+                        )
+                else:
+                    if images is not None:
+                        images_json = json.dumps(images)
+                    if article_meta is not None:
+                        meta_json = json.dumps(article_meta)
+
             await conn.execute(
                 """
                 INSERT INTO articles
-                    (site_id, feed_url, title, link, summary, author, published_at, guid, dedupe_key)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    (site_id, feed_url, title, link, summary, author, published_at, guid, dedupe_key,
+                     images, article_meta)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, '[]'), COALESCE($11, '{}'))
                 ON CONFLICT (site_id, dedupe_key) DO UPDATE SET
                     feed_url = EXCLUDED.feed_url,
                     title = EXCLUDED.title,
@@ -844,6 +945,8 @@ class Database:
                     author = EXCLUDED.author,
                     published_at = COALESCE(EXCLUDED.published_at, articles.published_at),
                     guid = COALESCE(EXCLUDED.guid, articles.guid),
+                    images = CASE WHEN $10 IS NOT NULL THEN $10 ELSE articles.images END,
+                    article_meta = CASE WHEN $11 IS NOT NULL THEN $11 ELSE articles.article_meta END,
                     fetched_at = CURRENT_TIMESTAMP
                 """,
                 site_id,
@@ -855,6 +958,8 @@ class Database:
                 published_at,
                 (guid_n or "")[:2000] or None,
                 key[:2100],
+                images_json,
+                meta_json,
             )
             return True
 
@@ -931,14 +1036,11 @@ class Database:
 
     async def ingest_rss_articles(self, site_id: int, feeds: List[Dict], max_per_feed: int = 50) -> int:
         """Parse chaque flux RSS et stocke les articles. Retourne le nombre upserted."""
-        import feedparser
-        from datetime import datetime, timezone
-        from time import mktime
-
-        feeds = feeds or []
+        from services.ingest_service import IngestService
         from utils import collapse_equivalent_feeds
 
-        feeds = collapse_equivalent_feeds(feeds)
+        feeds = collapse_equivalent_feeds(feeds or [])
+        service = IngestService(max_entries=max_per_feed)
         seen_feed_urls = set()
         count = 0
 
@@ -948,39 +1050,20 @@ class Database:
                 continue
             seen_feed_urls.add(feed_url)
 
-            try:
-                parsed = feedparser.parse(feed_url)
-            except Exception:
-                continue
-
-            for entry in (parsed.entries or [])[:max_per_feed]:
-                link = entry.get("link") or entry.get("id") or ""
-                if not link:
-                    continue
-
-                published_at = None
-                published_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
-                if published_parsed:
-                    try:
-                        published_at = datetime.fromtimestamp(mktime(published_parsed), tz=timezone.utc).replace(tzinfo=None)
-                    except (OverflowError, ValueError, TypeError):
-                        published_at = None
-
-                summary = entry.get("summary") or entry.get("description") or ""
-                if len(summary) > 4000:
-                    summary = summary[:4000] + "…"
-
-                created = await self.upsert_article(
+            for art in service.parse_feed(feed_url):
+                ok = await self.upsert_article(
                     site_id=site_id,
-                    feed_url=feed_url,
-                    title=entry.get("title") or "Sans titre",
-                    link=link,
-                    summary=summary or None,
-                    author=entry.get("author"),
-                    published_at=published_at,
-                    guid=entry.get("id") or entry.get("guid"),
+                    feed_url=art.feed_url,
+                    title=art.title,
+                    link=art.link,
+                    summary=art.summary,
+                    author=art.author,
+                    published_at=art.published_at,
+                    guid=art.guid,
+                    images=art.images or None,
+                    article_meta=art.article_meta or None,
                 )
-                if created:
+                if ok:
                     count += 1
 
         return count

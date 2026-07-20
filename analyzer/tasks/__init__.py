@@ -40,120 +40,153 @@ def _send_ws(message: dict) -> None:
 
 
 def _run(coro):
+    """Execute une coroutine Celery puis ferme proprement la event loop."""
     loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        asyncio.set_event_loop(loop)
         return loop.run_until_complete(coro)
     finally:
+        try:
+            # Laisser aiosqlite / aiohttp finir leurs callbacks thread-safe
+            loop.run_until_complete(asyncio.sleep(0.05))
+        except Exception:
+            pass
+        try:
+            loop.run_until_complete(asyncio.sleep(0))
+        except Exception:
+            pass
+        pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            try:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except Exception:
+                pass
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
         loop.close()
+        asyncio.set_event_loop(None)
+
+
+async def _with_db(fn):
+    """Init DB, execute fn(db), ferme toujours le pool SQLite."""
+    db = Database()
+    await db.init_db()
+    try:
+        return await fn(db)
+    finally:
+        await db.close()
 
 
 async def _crawl_and_persist(site_id: int, url: str, max_pages: int, depth: int) -> dict:
-    db = Database()
-    await db.init_db()
-    await db.update_site_status(site_id, "analyzing")
+    async def _work(db: Database):
+        await db.update_site_status(site_id, "analyzing")
 
-    pages_done = 0
-    # total provisoire = plafond ; remplace apres discovery par le vrai plan
-    planned_total = {"n": max(1, max_pages)}
+        pages_done = 0
+        planned_total = {"n": max(1, max_pages)}
 
-    async def on_page(page_url, title, feeds):
-        nonlocal pages_done
-        pages_done += 1
-        await db.add_page_analysis(site_id, page_url, title, feeds)
-        _send_ws(
-            {
-                "type": "page_analyzed",
-                "site_id": site_id,
-                "url": page_url,
-                "title": title,
-                "pages_analyzed": pages_done,
-                "total_pages": planned_total["n"],
-            }
-        )
-        logger.debug("page_analyzed site_id=%s n=%s/%s url=%s", site_id, pages_done, planned_total["n"], page_url)
+        async def on_page(page_url, title, feeds):
+            nonlocal pages_done
+            pages_done += 1
+            await db.add_page_analysis(site_id, page_url, title, feeds)
+            _send_ws(
+                {
+                    "type": "page_analyzed",
+                    "site_id": site_id,
+                    "url": page_url,
+                    "title": title,
+                    "pages_analyzed": pages_done,
+                    "total_pages": planned_total["n"],
+                }
+            )
+            logger.debug(
+                "page_analyzed site_id=%s n=%s/%s url=%s",
+                site_id, pages_done, planned_total["n"], page_url,
+            )
 
-    async def on_feed(feed: dict):
-        _send_ws(
-            {
-                "type": "rss_found",
-                "site_id": site_id,
-                "rss_url": feed.get("url"),
-                "title": feed.get("title"),
-                "source_page": feed.get("source_page"),
-            }
-        )
-        logger.info("rss_found site_id=%s url=%s", site_id, feed.get("url"))
+        async def on_feed(feed: dict):
+            _send_ws(
+                {
+                    "type": "rss_found",
+                    "site_id": site_id,
+                    "rss_url": feed.get("url"),
+                    "title": feed.get("title"),
+                    "source_page": feed.get("source_page"),
+                }
+            )
+            logger.info("rss_found site_id=%s url=%s", site_id, feed.get("url"))
 
-    async def on_plan(total: int):
-        planned_total["n"] = max(1, int(total))
+        async def on_plan(total: int):
+            planned_total["n"] = max(1, int(total))
+            _send_ws(
+                {
+                    "type": "progress_update",
+                    "site_id": site_id,
+                    "current": pages_done,
+                    "total": planned_total["n"],
+                    "message": f"Plan: {planned_total['n']} page(s) a analyser",
+                }
+            )
+            logger.info("Crawl plan site_id=%s total=%s", site_id, planned_total["n"])
+
+        async def should_cancel() -> bool:
+            return await db.is_cancel_requested(site_id)
+
+        service = CrawlService(on_page=on_page, on_feed=on_feed, on_plan=on_plan)
+        logger.info("Crawl start site_id=%s url=%s max_pages=%s depth=%s", site_id, url, max_pages, depth)
         _send_ws(
             {
                 "type": "progress_update",
                 "site_id": site_id,
-                "current": pages_done,
-                "total": planned_total["n"],
-                "message": f"Plan: {planned_total['n']} page(s) a analyser",
+                "current": 0,
+                "total": None,
+                "message": "Discovery des liens...",
             }
         )
-        logger.info("Crawl plan site_id=%s total=%s", site_id, planned_total["n"])
+        result = await service.run(
+            url, max_pages=max_pages, depth=depth, should_cancel=should_cancel
+        )
+        logger.info(
+            "Crawl end site_id=%s status=%s pages=%s feeds=%s",
+            site_id,
+            result.status,
+            result.total_pages_analyzed,
+            len(result.rss_feeds),
+        )
+        if result.site_meta:
+            await db.update_site_meta(site_id, result.site_meta)
+            _send_ws(
+                {
+                    "type": "site_meta",
+                    "site_id": site_id,
+                    "title": result.site_meta.get("title"),
+                    "favicon_url": result.site_meta.get("favicon_url"),
+                    "description": result.site_meta.get("description"),
+                }
+            )
+        feeds = [f.model_dump() for f in result.rss_feeds]
+        from utils import collapse_equivalent_feeds
 
-    async def should_cancel() -> bool:
-        return await db.is_cancel_requested(site_id)
-
-    service = CrawlService(on_page=on_page, on_feed=on_feed, on_plan=on_plan)
-    logger.info("Crawl start site_id=%s url=%s max_pages=%s depth=%s", site_id, url, max_pages, depth)
-    _send_ws(
-        {
-            "type": "progress_update",
-            "site_id": site_id,
-            "current": 0,
-            "total": None,
-            "message": "Discovery des liens...",
+        feeds = collapse_equivalent_feeds(feeds)
+        status = result.status
+        if await should_cancel():
+            status = "cancelled"
+        await db.update_site_status(
+            site_id, status, feeds, result.total_pages_analyzed, merge_feeds=True
+        )
+        site = await db.get_site(site_id)
+        merged = (site or {}).get("rss_feeds") or feeds
+        return {
+            "status": status,
+            "rss_feeds": merged,
+            "total_pages_analyzed": result.total_pages_analyzed,
+            "error": result.error,
         }
-    )
-    result = await service.run(
-        url, max_pages=max_pages, depth=depth, should_cancel=should_cancel
-    )
-    logger.info(
-        "Crawl end site_id=%s status=%s pages=%s feeds=%s",
-        site_id,
-        result.status,
-        result.total_pages_analyzed,
-        len(result.rss_feeds),
-    )
-    if result.site_meta:
-        await db.update_site_meta(site_id, result.site_meta)
-        _send_ws(
-            {
-                "type": "site_meta",
-                "site_id": site_id,
-                "title": result.site_meta.get("title"),
-                "favicon_url": result.site_meta.get("favicon_url"),
-                "description": result.site_meta.get("description"),
-            }
-        )
-    feeds = [f.model_dump() for f in result.rss_feeds]
-    # Fusionne RSS/Atom (et http/https) qui portent les memes articles
-    from utils import collapse_equivalent_feeds
 
-    feeds = collapse_equivalent_feeds(feeds)
-    status = result.status
-    if await should_cancel():
-        status = "cancelled"
-    # merge_feeds=True : ajoute aux feeds deja en base (relance meme domaine)
-    await db.update_site_status(
-        site_id, status, feeds, result.total_pages_analyzed, merge_feeds=True
-    )
-    # Pour l'ingest : recharger la liste fusionnee
-    site = await db.get_site(site_id)
-    merged = (site or {}).get("rss_feeds") or feeds
-    return {
-        "status": status,
-        "rss_feeds": merged,
-        "total_pages_analyzed": result.total_pages_analyzed,
-        "error": result.error,
-    }
+    return await _with_db(_work)
 
 
 @celery_app.task(bind=True, name="streamnews.crawl_site")
@@ -210,11 +243,12 @@ def crawl_site_task(self, site_id: int, url: str, max_pages: int = 50, depth: in
         if feeds:
             # persiste les feeds trouves
             async def _save():
-                db = Database()
-                await db.init_db()
-                await db.update_site_status(
-                    site_id, "error", feeds, crawl.get("total_pages_analyzed", 0)
-                )
+                async def _work(db: Database):
+                    await db.update_site_status(
+                        site_id, "error", feeds, crawl.get("total_pages_analyzed", 0)
+                    )
+
+                await _with_db(_work)
             try:
                 _run(_save())
             except Exception:
@@ -280,9 +314,10 @@ def crawl_site_task(self, site_id: int, url: str, max_pages: int = 50, depth: in
 
 
 async def _mark_error(site_id: int):
-    db = Database()
-    await db.init_db()
-    await db.update_site_status(site_id, "error")
+    async def _work(db: Database):
+        await db.update_site_status(site_id, "error")
+
+    await _with_db(_work)
 
 
 @celery_app.task(name="streamnews.ingest_feed")
@@ -292,22 +327,25 @@ def ingest_feed_task(site_id: int, feed_url: str) -> int:
     articles = service.parse_feed(feed_url)
 
     async def _persist():
-        db = Database()
-        await db.init_db()
-        n = 0
-        for art in articles:
-            await db.upsert_article(
-                site_id=site_id,
-                feed_url=art.feed_url,
-                title=art.title,
-                link=art.link,
-                summary=art.summary,
-                author=art.author,
-                published_at=art.published_at,
-                guid=art.guid,
-            )
-            n += 1
-        return n
+        async def _work(db: Database):
+            n = 0
+            for art in articles:
+                await db.upsert_article(
+                    site_id=site_id,
+                    feed_url=art.feed_url,
+                    title=art.title,
+                    link=art.link,
+                    summary=art.summary,
+                    author=art.author,
+                    published_at=art.published_at,
+                    guid=art.guid,
+                    images=art.images or None,
+                    article_meta=art.article_meta or None,
+                )
+                n += 1
+            return n
+
+        return await _with_db(_work)
 
     try:
         count = _run(_persist())
@@ -356,75 +394,87 @@ def enrich_article_task(article_id: int, force: bool = False) -> dict:
     """Fetch la page article et stocke contenu + meta + images."""
 
     async def _run_enrich():
-        db = Database()
-        await db.init_db()
-        article = await db.get_article(article_id)
-        if not article:
-            return {"article_id": article_id, "status": "missing"}
-        if article.get("enrich_status") == "ok" and not force:
-            return {
-                "article_id": article_id,
-                "status": "ok",
-                "skipped": True,
-                "site_id": article.get("site_id"),
-            }
-
-        await db.set_article_enrich_pending(article_id)
-        link = article.get("link") or ""
-        try:
-            data = await enrich_article_url(link)
-            # Ne remplace le titre RSS que si on a quelque chose de plus riche
-            new_title = data.get("title")
-            if new_title and article.get("title") and new_title == article.get("title"):
-                new_title = None
-            await db.update_article_enrichment(
-                article_id,
-                content_html=data.get("content_html") or "",
-                content_text=data.get("content_text") or "",
-                images=data.get("images") or [],
-                article_meta=data.get("article_meta") or {},
-                enrich_status="ok",
-                enrich_error=None,
-                title=new_title,
-                author=data.get("author"),
-            )
-            _send_ws(
-                {
-                    "type": "article_enriched",
+        async def _work(db: Database):
+            article = await db.get_article(article_id)
+            if not article:
+                return {"article_id": article_id, "status": "missing"}
+            if article.get("enrich_status") == "ok" and not force:
+                return {
                     "article_id": article_id,
-                    "site_id": article.get("site_id"),
                     "status": "ok",
-                    "title": data.get("title") or article.get("title"),
-                    "images_count": len(data.get("images") or []),
-                }
-            )
-            return {
-                "article_id": article_id,
-                "status": "ok",
-                "site_id": article.get("site_id"),
-            }
-        except Exception as exc:
-            logger.warning("enrich_article failed id=%s: %s", article_id, exc)
-            await db.update_article_enrichment(
-                article_id,
-                enrich_status="error",
-                enrich_error=str(exc)[:1000],
-            )
-            _send_ws(
-                {
-                    "type": "article_enriched",
-                    "article_id": article_id,
+                    "skipped": True,
                     "site_id": article.get("site_id"),
-                    "status": "error",
-                    "error": str(exc)[:300],
                 }
-            )
-            return {
-                "article_id": article_id,
-                "status": "error",
-                "error": str(exc),
-                "site_id": article.get("site_id"),
-            }
+
+            await db.set_article_enrich_pending(article_id)
+            link = article.get("link") or ""
+            try:
+                data = await enrich_article_url(link)
+                new_title = data.get("title")
+                if new_title and article.get("title") and new_title == article.get("title"):
+                    new_title = None
+                existing_meta = article.get("article_meta") or {}
+                new_meta = data.get("article_meta") or {}
+                merged_meta = {**existing_meta, **new_meta}
+                merged_meta["sources"] = list(dict.fromkeys(
+                    (existing_meta.get("sources") or []) + (new_meta.get("sources") or [])
+                ))
+                merged_meta["keywords"] = db._merge_article_meta_dict(
+                    existing_meta, new_meta
+                ).get("keywords") or existing_meta.get("keywords") or new_meta.get("keywords")
+                merged_images = db._merge_image_lists(
+                    article.get("images"), data.get("images") or []
+                )
+                await db.update_article_enrichment(
+                    article_id,
+                    content_html=data.get("content_html") or "",
+                    content_text=data.get("content_text") or "",
+                    images=merged_images,
+                    article_meta=merged_meta,
+                    enrich_status="ok",
+                    enrich_error=None,
+                    title=new_title,
+                    author=data.get("author"),
+                )
+                _send_ws(
+                    {
+                        "type": "article_enriched",
+                        "article_id": article_id,
+                        "site_id": article.get("site_id"),
+                        "status": "ok",
+                        "title": data.get("title") or article.get("title"),
+                        "images_count": len(data.get("images") or []),
+                    }
+                )
+                return {
+                    "article_id": article_id,
+                    "status": "ok",
+                    "site_id": article.get("site_id"),
+                }
+            except Exception as exc:
+                logger.warning("enrich_article failed id=%s: %s", article_id, exc)
+                await db.update_article_enrichment(
+                    article_id,
+                    enrich_status="error",
+                    enrich_error=str(exc)[:1000],
+                )
+                _send_ws(
+                    {
+                        "type": "article_enriched",
+                        "article_id": article_id,
+                        "site_id": article.get("site_id"),
+                        "status": "error",
+                        "error": str(exc)[:300],
+                    }
+                )
+                return {
+                    "article_id": article_id,
+                    "status": "error",
+                    "error": str(exc),
+                    "site_id": article.get("site_id"),
+                }
+
+        return await _with_db(_work)
 
     return _run(_run_enrich())
 
@@ -434,9 +484,10 @@ def enrich_site_articles_task(site_id: int, limit: int = 50) -> dict:
     """Enqueue l'enrichissement des articles d'un site (sans contenu ok)."""
 
     async def _list():
-        db = Database()
-        await db.init_db()
-        return await db.list_articles_needing_enrichment(site_id, limit=limit)
+        async def _work(db: Database):
+            return await db.list_articles_needing_enrichment(site_id, limit=limit)
+
+        return await _with_db(_work)
 
     articles = _run(_list())
     queued = 0
@@ -457,11 +508,11 @@ def analyze_site_task(self, site_id: int, url: str, max_pages: int = 50, depth: 
 
 @celery_app.task(name="celery_worker.cleanup_old_analyses")
 def cleanup_old_analyses(days: int = 30):
-    db = Database()
-
     async def _clean():
-        await db.init_db()
-        return await db.cleanup_old_analyses(days)
+        async def _work(db: Database):
+            return await db.cleanup_old_analyses(days)
+
+        return await _with_db(_work)
 
     try:
         deleted = _run(_clean())

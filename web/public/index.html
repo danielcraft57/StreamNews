@@ -190,6 +190,49 @@
         .article-item {
             cursor: pointer;
             transition: border-color 0.2s ease, background-color 0.2s ease;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .article-item-thumb {
+            flex: 0 0 72px;
+            width: 72px;
+            height: 72px;
+            border-radius: 8px;
+            object-fit: cover;
+            background: #eef1f5;
+        }
+
+        .article-item-thumb.placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #99a;
+            font-size: 1.4rem;
+        }
+
+        .article-item-body {
+            min-width: 0;
+            flex: 1;
+        }
+
+        .article-item-body h4 {
+            margin: 0 0 6px;
+            font-size: 0.98rem;
+            line-height: 1.35;
+        }
+
+        .article-item-body p {
+            margin: 0 0 6px;
+            color: #555;
+            font-size: 0.88rem;
+            line-height: 1.45;
+        }
+
+        .article-item-meta {
+            color: #777;
+            font-size: 0.78rem;
         }
 
         .article-item:hover {
@@ -216,6 +259,112 @@
         .article-enrich-badge.ok { background: #d4edda; color: #155724; }
         .article-enrich-badge.pending { background: #fff3cd; color: #856404; }
         .article-enrich-badge.error { background: #f8d7da; color: #721c24; }
+
+        .reader-hero {
+            margin: 0 0 16px;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #f0f2f5;
+        }
+
+        .reader-hero img {
+            display: block;
+            width: 100%;
+            max-height: 320px;
+            object-fit: cover;
+        }
+
+        .reader-chapo {
+            font-size: 1.05rem;
+            line-height: 1.55;
+            color: #444;
+            margin: 0 0 18px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .reader-keywords {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin: 0 0 14px;
+        }
+
+        .reader-keyword {
+            background: #eef1ff;
+            color: #445;
+            font-size: 0.75rem;
+            padding: 3px 8px;
+            border-radius: 999px;
+        }
+
+        .reader-gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 8px;
+            margin: 16px 0;
+        }
+
+        .reader-gallery img {
+            width: 100%;
+            height: 88px;
+            object-fit: cover;
+            border-radius: 6px;
+            background: #f0f2f5;
+        }
+
+        .reader-meta-panel {
+            margin-top: 16px;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .reader-meta-panel summary {
+            cursor: pointer;
+            padding: 10px 14px;
+            background: #f8f9fa;
+            font-size: 0.88rem;
+            color: #555;
+            user-select: none;
+        }
+
+        .reader-meta-panel dl {
+            margin: 0;
+            padding: 12px 14px;
+            font-size: 0.82rem;
+        }
+
+        .reader-meta-panel dt {
+            color: #777;
+            margin-top: 8px;
+        }
+
+        .reader-meta-panel dt:first-child {
+            margin-top: 0;
+        }
+
+        .reader-meta-panel dd {
+            margin: 2px 0 0;
+            color: #333;
+            word-break: break-word;
+        }
+
+        .reader-badge-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+
+        .reader-type-badge {
+            display: inline-block;
+            font-size: 0.72rem;
+            padding: 3px 8px;
+            border-radius: 4px;
+            background: #e9ecef;
+            color: #444;
+        }
 
         .article-reader {
             background: #fff;
@@ -251,17 +400,7 @@
         }
 
         .article-reader .reader-images {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin: 12px 0 16px;
-        }
-
-        .article-reader .reader-images img {
-            max-width: 100%;
-            max-height: 180px;
-            border-radius: 6px;
-            object-fit: cover;
+            display: none;
         }
 
         .article-reader .reader-body {
@@ -547,6 +686,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=20260719m"></script>
+    <script src="app.js?v=20260720a"></script>
 </body>
 </html> 

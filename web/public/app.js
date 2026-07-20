@@ -12,8 +12,31 @@ class StreamNewsApp {
 
     init() {
         this.setupEventListeners();
+        this.setupImageFallbacks();
         this.loadSites();
         this.connectWebSocket();
+    }
+
+    setupImageFallbacks() {
+        // Pas de onerror= inline (CSP script-src-attr 'none' via Helmet)
+        document.addEventListener('error', (e) => {
+            const img = e.target;
+            if (!(img instanceof HTMLImageElement)) return;
+            if (img.classList.contains('js-hide-on-error')) {
+                img.style.display = 'none';
+            }
+            if (img.classList.contains('js-hide-parent-on-error')) {
+                const parent = img.parentElement;
+                if (parent) parent.style.display = 'none';
+            }
+            if (img.classList.contains('article-item-thumb')) {
+                img.replaceWith(Object.assign(document.createElement('div'), {
+                    className: 'article-item-thumb placeholder',
+                    textContent: '📰',
+                    ariaHidden: true,
+                }));
+            }
+        }, true);
     }
 
     setupEventListeners() {
@@ -321,7 +344,7 @@ class StreamNewsApp {
                     const feeds = this.parseRssFeeds(site.rss_feeds);
                     const title = site.site_title || site.url;
                     const favicon = site.favicon_url
-                        ? `<img class="site-favicon" src="${this.escapeAttr(site.favicon_url)}" alt="" width="20" height="20" loading="lazy" onerror="this.style.display='none'">`
+                        ? `<img class="site-favicon js-hide-on-error" src="${this.escapeAttr(site.favicon_url)}" alt="" width="20" height="20" loading="lazy">`
                         : `<span class="site-favicon site-favicon-fallback" aria-hidden="true"></span>`;
                     const desc = site.meta_description
                         ? `<div class="site-desc">${this.escapeHtml(site.meta_description.slice(0, 140))}${site.meta_description.length > 140 ? '…' : ''}</div>`
@@ -379,7 +402,7 @@ class StreamNewsApp {
             const resultsDiv = document.getElementById('results');
             const extra = site.meta_extra && typeof site.meta_extra === 'object' ? site.meta_extra : {};
             const favicon = site.favicon_url
-                ? `<img class="site-favicon site-favicon-lg" src="${this.escapeAttr(site.favicon_url)}" alt="" width="32" height="32" onerror="this.style.display='none'">`
+                ? `<img class="site-favicon site-favicon-lg js-hide-on-error" src="${this.escapeAttr(site.favicon_url)}" alt="" width="32" height="32">`
                 : '';
             resultsDiv.innerHTML = `
                 <h3>Détails de l'analyse</h3>
@@ -392,7 +415,7 @@ class StreamNewsApp {
                         </div>
                     </div>
                     ${site.meta_description ? `<p>${this.escapeHtml(site.meta_description)}</p>` : ''}
-                    ${extra.og_image ? `<p><img src="${this.escapeAttr(extra.og_image)}" alt="" style="max-width:100%;max-height:160px;border-radius:8px" onerror="this.style.display='none'"></p>` : ''}
+                    ${extra.og_image ? `<p><img class="js-hide-on-error" src="${this.escapeAttr(extra.og_image)}" alt="" style="max-width:100%;max-height:160px;border-radius:8px"></p>` : ''}
                     <p><strong>Statut:</strong> <span class="status ${site.status}">${this.getStatusText(site.status)}</span></p>
                     <p><strong>Pages analysées:</strong> ${site.total_pages_analyzed || 0}</p>
                     <p><strong>Date:</strong> ${new Date(site.created_at).toLocaleString()}</p>
@@ -496,19 +519,76 @@ class StreamNewsApp {
         }
     }
 
+    articleMeta(article) {
+        const meta = article?.article_meta;
+        return meta && typeof meta === 'object' ? meta : {};
+    }
+
+    articleImages(article) {
+        return Array.isArray(article?.images) ? article.images : [];
+    }
+
+    articleThumb(article) {
+        const imgs = this.articleImages(article);
+        return imgs.length ? imgs[0].url : null;
+    }
+
+    articleDomain(article) {
+        const meta = this.articleMeta(article);
+        if (meta.domain) return meta.domain;
+        try {
+            return new URL(article.link).hostname.replace(/^www\./, '');
+        } catch (_) {
+            return '';
+        }
+    }
+
+    articleChapo(article) {
+        const meta = this.articleMeta(article);
+        return meta.description || this.stripHtml(article.summary || '');
+    }
+
+    enrichStatusLabel(status) {
+        const map = {
+            ok: 'enrichi',
+            pending: 'en cours',
+            error: 'erreur',
+        };
+        return map[status] || status || '';
+    }
+
+    formatReadingTime(meta) {
+        const mins = meta?.reading_time_minutes;
+        if (!mins) return '';
+        return mins === 1 ? '1 min de lecture' : `${mins} min de lecture`;
+    }
+
     renderArticleListItem(article) {
         const status = article.enrich_status || '';
         const badge = status
-            ? `<span class="article-enrich-badge ${this.escapeAttr(status)}">${this.escapeHtml(status)}</span>`
+            ? `<span class="article-enrich-badge ${this.escapeAttr(status)}">${this.escapeHtml(this.enrichStatusLabel(status))}</span>`
             : '';
         const selected = this.selectedArticleId === article.id ? ' is-selected' : '';
+        const thumbUrl = this.articleThumb(article);
+        const thumb = thumbUrl
+            ? `<img class="article-item-thumb" src="${this.escapeAttr(thumbUrl)}" alt="" loading="lazy">`
+            : `<div class="article-item-thumb placeholder" aria-hidden="true">📰</div>`;
+        const domain = this.articleDomain(article);
+        const chapo = this.articleChapo(article);
+        const dateStr = article.published_at
+            ? new Date(article.published_at).toLocaleDateString()
+            : 'Date inconnue';
+
         return `
             <div class="rss-feed article-item${selected}" data-article-id="${article.id}">
-                <h4>${this.escapeHtml(article.title || 'Sans titre')}${badge}</h4>
-                ${article.summary ? `<p>${this.escapeHtml(this.stripHtml(article.summary).slice(0, 160))}${this.stripHtml(article.summary).length > 160 ? '…' : ''}</p>` : ''}
-                <small>
-                    ${article.published_at ? this.escapeHtml(new Date(article.published_at).toLocaleString()) : 'Date inconnue'}
-                </small>
+                ${thumb}
+                <div class="article-item-body">
+                    <h4>${this.escapeHtml(article.title || 'Sans titre')}${badge}</h4>
+                    ${chapo ? `<p>${this.escapeHtml(chapo.slice(0, 140))}${chapo.length > 140 ? '…' : ''}</p>` : ''}
+                    <small class="article-item-meta">
+                        ${domain ? `${this.escapeHtml(domain)} · ` : ''}${this.escapeHtml(dateStr)}
+                    </small>
+                </div>
             </div>
         `;
     }
@@ -595,7 +675,7 @@ class StreamNewsApp {
             el.appendChild(badge);
         }
         badge.className = `article-enrich-badge ${status || ''}`;
-        badge.textContent = status || '';
+        badge.textContent = this.enrichStatusLabel(status);
     }
 
     renderArticleReader(article, { loading } = {}) {
@@ -603,56 +683,100 @@ class StreamNewsApp {
         if (!reader || this.selectedArticleId !== article.id) return;
         reader.classList.remove('empty');
 
-        const meta = article.article_meta && typeof article.article_meta === 'object'
-            ? article.article_meta
-            : {};
+        const meta = this.articleMeta(article);
         const author = article.author || meta.author || '';
         const published = article.published_at
             ? new Date(article.published_at).toLocaleString()
             : (meta.date_published || '');
-        const images = Array.isArray(article.images) ? article.images : [];
-        const heroImages = images.slice(0, 4);
+        const images = this.articleImages(article);
+        const hero = images[0];
+        const gallery = images.slice(1);
+        const chapo = this.articleChapo(article);
+        const domain = this.articleDomain(article);
+        const reading = this.formatReadingTime(meta);
+        const keywords = Array.isArray(meta.keywords) ? meta.keywords : [];
+        const status = article.enrich_status || '';
+        const statusBadge = status
+            ? `<span class="article-enrich-badge ${this.escapeAttr(status)}">${this.escapeHtml(this.enrichStatusLabel(status))}</span>`
+            : '';
+        const typeBadge = meta.schema_type || meta.og_type
+            ? `<span class="reader-type-badge">${this.escapeHtml(meta.schema_type || meta.og_type)}</span>`
+            : '';
 
         let bodyHtml = '';
         if (loading) {
             bodyHtml = `<p class="reader-meta">Enrichissement en cours (fetch de la page)…</p>
-                ${article.summary ? `<div class="reader-body"><p>${this.escapeHtml(this.stripHtml(article.summary))}</p></div>` : ''}`;
+                ${chapo ? `<p class="reader-chapo">${this.escapeHtml(chapo)}</p>` : ''}`;
         } else if (article.enrich_status === 'error') {
             bodyHtml = `<p class="reader-meta">Enrichissement echoue: ${this.escapeHtml(article.enrich_error || 'erreur')}</p>
-                ${article.summary ? `<div class="reader-body"><p>${this.escapeHtml(this.stripHtml(article.summary))}</p></div>` : ''}`;
+                ${chapo ? `<p class="reader-chapo">${this.escapeHtml(chapo)}</p>` : ''}`;
         } else if (article.content_html) {
             bodyHtml = `<div class="reader-body">${article.content_html}</div>`;
         } else if (article.content_text) {
             bodyHtml = `<div class="reader-body"><p>${this.escapeHtml(article.content_text).replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>')}</p></div>`;
-        } else if (article.summary) {
-            bodyHtml = `<div class="reader-body"><p>${this.escapeHtml(this.stripHtml(article.summary))}</p></div>`;
+        } else if (chapo) {
+            bodyHtml = `<p class="reader-chapo">${this.escapeHtml(chapo)}</p>`;
         } else {
             bodyHtml = `<p class="reader-meta">Pas de contenu disponible</p>`;
         }
 
-        const sources = Array.isArray(meta.sources) ? meta.sources.join(', ') : '';
+        const chapoBlock = (!loading && article.enrich_status !== 'error' && chapo && article.content_html)
+            ? `<p class="reader-chapo">${this.escapeHtml(chapo)}</p>`
+            : '';
+
+        const keywordsBlock = keywords.length
+            ? `<div class="reader-keywords">${keywords.map((kw) =>
+                `<span class="reader-keyword">${this.escapeHtml(kw)}</span>`).join('')}</div>`
+            : '';
+
+        const galleryBlock = gallery.length
+            ? `<div class="reader-gallery">${gallery.map((img) =>
+                `<img class="js-hide-on-error" src="${this.escapeAttr(img.url)}" alt="${this.escapeAttr(img.alt || '')}" loading="lazy" title="${this.escapeAttr(img.source || '')}">`
+            ).join('')}</div>`
+            : '';
+
+        const metaRows = [
+            ['Sources', (meta.sources || []).join(', ')],
+            ['Flux RSS', article.feed_url],
+            ['Schema', meta.schema_type],
+            ['OG type', meta.og_type],
+            ['Domaine', meta.domain || domain],
+            ['Canonique', meta.canonical_url],
+            ['Modifie', meta.date_modified],
+            ['Enrichi', article.enriched_at ? new Date(article.enriched_at).toLocaleString() : ''],
+            ['Images', `${images.length} (${images.map((i) => i.source || '?').join(', ')})`],
+        ].filter(([, val]) => val);
+
+        const metaPanel = metaRows.length
+            ? `<details class="reader-meta-panel">
+                <summary>Metadonnees techniques</summary>
+                <dl>${metaRows.map(([label, val]) =>
+                    `<dt>${this.escapeHtml(label)}</dt><dd>${this.escapeHtml(String(val))}</dd>`
+                ).join('')}</dl>
+               </details>`
+            : '';
 
         reader.innerHTML = `
+            <div class="reader-badge-row">${statusBadge}${typeBadge}</div>
             <h3>${this.escapeHtml(article.title || 'Sans titre')}</h3>
             <div class="reader-meta">
                 ${published ? this.escapeHtml(published) : ''}
                 ${author ? ` · ${this.escapeHtml(author)}` : ''}
-                ${sources ? ` · meta: ${this.escapeHtml(sources)}` : ''}
+                ${domain ? ` · ${this.escapeHtml(domain)}` : ''}
+                ${reading ? ` · ${this.escapeHtml(reading)}` : ''}
             </div>
-            ${heroImages.length ? `
-                <div class="reader-images">
-                    ${heroImages.map(img => `
-                        <img src="${this.escapeAttr(img.url)}" alt="${this.escapeAttr(img.alt || '')}" loading="lazy" onerror="this.style.display='none'">
-                    `).join('')}
-                </div>
-            ` : ''}
+            ${hero ? `<div class="reader-hero"><img class="js-hide-parent-on-error" src="${this.escapeAttr(hero.url)}" alt="${this.escapeAttr(hero.alt || '')}" loading="lazy"></div>` : ''}
+            ${keywordsBlock}
+            ${chapoBlock}
             ${bodyHtml}
+            ${galleryBlock}
             <div class="reader-actions">
                 <a href="${this.escapeAttr(article.link)}" target="_blank" rel="noopener noreferrer">Ouvrir l'original</a>
                 ${article.enrich_status === 'ok' ? `
                     · <button type="button" class="btn" data-reenrich="${article.id}" style="width:auto;padding:6px 12px;font-size:13px;display:inline-block">Relire la page</button>
                 ` : ''}
             </div>
+            ${metaPanel}
         `;
 
         const reBtn = reader.querySelector('[data-reenrich]');

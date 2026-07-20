@@ -40,6 +40,10 @@ Prerequis : Python 3.11+ et Node.js 18+ (Python 3.13 OK en mode local SQLite).
 .\scripts\dev.ps1 -Local
 ```
 
+Hot reload par defaut : analyzer (`uvicorn --reload`), web (`nodemon`), worker Celery (`watchdog`).
+Les fichiers `web/public/*` se rechargent avec un refresh navigateur (pas de restart).
+`-SkipInit` evite de relancer init-db ; `-NoReload` desactive le hot reload.
+
 Sous Windows, Celery tourne avec `--pool=solo` (obligatoire, pas de prefork).
 
 ### Linux / macOS (bash)

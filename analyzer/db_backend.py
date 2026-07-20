@@ -182,6 +182,10 @@ class SqlitePool:
 
     async def close(self):
         if self._conn is not None:
+            try:
+                await self._conn.commit()
+            except Exception:
+                pass
             await self._conn.close()
             self._conn = None
 

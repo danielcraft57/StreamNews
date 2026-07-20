@@ -11,6 +11,13 @@ import feedparser
 from logging_config import get_logger
 from models import ArticleCandidate, IngestFeedResult
 from utils import normalize_identifier, normalize_url
+from utils.rss_entry import (
+    entry_article_meta,
+    entry_author,
+    entry_images,
+    entry_link,
+    entry_summary,
+)
 
 logger = get_logger(__name__)
 
@@ -30,7 +37,7 @@ class IngestService:
             return articles
 
         for entry in (parsed.entries or [])[: self.max_entries]:
-            link = normalize_url(entry.get("link") or entry.get("id") or "")
+            link = normalize_url(entry_link(entry) or "")
             if not link:
                 continue
 
@@ -44,19 +51,27 @@ class IngestService:
                 except (OverflowError, ValueError, TypeError):
                     published_at = None
 
-            summary = entry.get("summary") or entry.get("description") or ""
-            if len(summary) > self.summary_max_len:
-                summary = summary[: self.summary_max_len] + "…"
+            summary = entry_summary(entry, max_len=self.summary_max_len)
+            images = entry_images(entry)
+            article_meta = entry_article_meta(entry)
+            if link:
+                from urllib.parse import urlparse
+
+                host = urlparse(link).netloc
+                if host:
+                    article_meta.setdefault("domain", host.lower())
 
             articles.append(
                 ArticleCandidate(
                     feed_url=normalize_url(feed_url) or feed_url,
                     title=entry.get("title") or "Sans titre",
                     link=link,
-                    summary=summary or None,
-                    author=entry.get("author"),
+                    summary=summary,
+                    author=entry_author(entry),
                     published_at=published_at,
                     guid=normalize_identifier(entry.get("id") or entry.get("guid")),
+                    images=images,
+                    article_meta=article_meta,
                 )
             )
         return articles

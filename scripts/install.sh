@@ -22,6 +22,7 @@ source .venv/bin/activate
 
 pip install --upgrade pip
 pip install -r analyzer/requirements.txt
+pip install -r analyzer/requirements-dev.txt
 
 cd web
 npm ci
