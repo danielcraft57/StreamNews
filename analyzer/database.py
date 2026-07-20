@@ -510,17 +510,10 @@ class Database:
 
     async def get_site(self, site_id: int) -> Optional[Dict]:
         """Récupère les détails d'un site"""
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM sites WHERE id = $1",
-                site_id
-            )
-            if row:
-                site = self._row_to_dict(row)
-                from repositories.normalized_read import hydrate_site
+        from repositories.sites_repo import SitesRepository
 
-                return await hydrate_site(conn, site, is_sqlite=self.is_sqlite)
-            return None
+        site = await SitesRepository(self.pool, is_sqlite=self.is_sqlite).get_by_id(site_id)
+        return site.to_api_dict() if site else None
 
     async def delete_site(self, site_id: int) -> Optional[Dict]:
         """Supprime un site ; pages + articles partent via ON DELETE CASCADE."""
@@ -535,10 +528,12 @@ class Database:
                 pages = await conn.fetchval(
                     "SELECT COUNT(*) FROM pages WHERE site_id = $1", site_id
                 )
-                data = self._row_to_dict(site)
-                from repositories.normalized_read import hydrate_site
+                from repositories.sites_repo import SitesRepository
 
-                data = await hydrate_site(conn, data, is_sqlite=self.is_sqlite)
+                record = await SitesRepository(
+                    self.pool, is_sqlite=self.is_sqlite
+                ).get_by_id(site_id)
+                data = record.to_api_dict() if record else self._row_to_dict(site)
                 await conn.execute("DELETE FROM sites WHERE id = $1", site_id)
                 return {
                     "site": data,
@@ -552,15 +547,10 @@ class Database:
 
     async def get_all_sites(self) -> List[Dict]:
         """Récupère tous les sites analysés"""
-        async with self.pool.acquire() as conn:
-            rows = await conn.fetch("SELECT * FROM sites ORDER BY created_at DESC")
-            from repositories.normalized_read import hydrate_site
+        from repositories.sites_repo import SitesRepository
 
-            out = []
-            for row in rows:
-                site = self._row_to_dict(row)
-                out.append(await hydrate_site(conn, site, is_sqlite=self.is_sqlite))
-            return out
+        sites = await SitesRepository(self.pool, is_sqlite=self.is_sqlite).list_all()
+        return [s.to_api_dict() for s in sites]
 
     async def get_site_pages(self, site_id: int) -> List[Dict]:
         """Récupère toutes les pages d'un site"""
@@ -576,46 +566,21 @@ class Database:
 
     async def get_site_articles(self, site_id: int, limit: int = 100) -> List[Dict]:
         """Liste articles (sans gros corps HTML - pour le panneau lecteur)."""
-        order = (
-            "ORDER BY published_at DESC, fetched_at DESC"
-            if self.is_sqlite
-            else "ORDER BY published_at DESC NULLS LAST, fetched_at DESC"
-        )
-        async with self.pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT id, site_id, feed_id, feed_url, title, link, summary, author,
-                       published_at, guid, dedupe_key, fetched_at,
-                       enriched_at, enrich_status, enrich_error,
-                       analysis_status, analysis_error, analyzed_at
-                FROM articles
-                WHERE site_id = $1
-                {order}
-                LIMIT $2
-                """,
-                site_id,
-                limit,
-            )
-            articles = [self._row_to_dict(row) for row in rows]
-            from repositories.normalized_read import hydrate_articles_batch
+        from repositories.articles_repo import ArticlesRepository
 
-            return await hydrate_articles_batch(
-                conn, articles, is_sqlite=self.is_sqlite, with_analyses=False
-            )
+        articles = await ArticlesRepository(
+            self.pool, is_sqlite=self.is_sqlite
+        ).list_by_site(site_id, limit=limit, with_body=False)
+        return [a.to_api_dict() for a in articles]
 
     async def get_article(self, article_id: int) -> Optional[Dict]:
         """Detail d'un article (contenu enrichi inclus)."""
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM articles WHERE id = $1",
-                article_id,
-            )
-            if not row:
-                return None
-            article = self._row_to_dict(row)
-            from repositories.normalized_read import hydrate_article
+        from repositories.articles_repo import ArticlesRepository
 
-            return await hydrate_article(conn, article, is_sqlite=self.is_sqlite)
+        article = await ArticlesRepository(
+            self.pool, is_sqlite=self.is_sqlite
+        ).get_by_id(article_id)
+        return article.to_api_dict() if article else None
 
     async def list_articles_needing_enrichment(
         self, site_id: int, limit: int = 50

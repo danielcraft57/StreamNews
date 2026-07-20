@@ -78,4 +78,5 @@ __all__ = [
     "ArticleAnalysisRecord",
     "ArticleMetaNormRecord",
     "ArticleRecord",
+    "SiteRecord",
 ]
