@@ -2,11 +2,9 @@
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
-sys.modules.setdefault("asyncpg", MagicMock())
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -21,6 +19,7 @@ def database_url():
 
 @pytest.fixture
 async def db(database_url):
+    # Import apres le path : asyncpg reel (ne pas mocker ici)
     from database import Database
 
     d = Database()
