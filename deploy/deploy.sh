@@ -48,7 +48,8 @@ case "$ROLE" in
     pip install -r analyzer/requirements.txt
     sudo systemctl daemon-reload
     sudo systemctl restart streamnews-worker
-    sudo systemctl --no-pager --full status streamnews-worker || true
+    # Arguments exacts = sudoers.d/streamnews-deploy (NOPASSWD)
+    sudo systemctl status streamnews-worker || true
     ;;
   app|all)
     if [[ ! -d .venv ]]; then
@@ -76,7 +77,10 @@ case "$ROLE" in
     if systemctl list-unit-files | grep -q streamnews-web; then
       sudo systemctl restart streamnews-web || true
     fi
-    sudo systemctl --no-pager --full status streamnews-analyzer streamnews-worker streamnews-web 2>/dev/null || true
+    # Une commande par unit (sudoers n'autorise pas le multi-unit / flags)
+    sudo systemctl status streamnews-analyzer 2>/dev/null || true
+    sudo systemctl status streamnews-worker 2>/dev/null || true
+    sudo systemctl status streamnews-web 2>/dev/null || true
     ;;
   *)
     echo "STREAMNEWS_ROLE inconnu: $ROLE (data|app|worker|all)"

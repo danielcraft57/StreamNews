@@ -53,6 +53,8 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: 22
+          # 3 noeuds + pip (build wheels ARM) + npm : 10m par defaut saute trop tot
+          command_timeout: 45m
           envs: FLEET_HOSTS,FLEET_USER,DEPLOY_PATH,DEPLOY_PATH_EDGE
           script: |
             set -euo pipefail
