@@ -101,12 +101,10 @@ async def test_update_article_analysis_dual_writes(temp_db_url):
 
     async with db.pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT analysis_status, article_meta FROM articles WHERE id = $1",
+            "SELECT analysis_status FROM articles WHERE id = $1",
             art["id"],
         )
         assert row["analysis_status"] == "ok"
-        meta = json.loads(row["article_meta"]) if isinstance(row["article_meta"], str) else row["article_meta"]
-        assert meta.get("analysis_status") == "ok"
 
         tool = await conn.fetchrow(
             "SELECT tool_name, status FROM article_analyses WHERE article_id = $1",
@@ -114,6 +112,11 @@ async def test_update_article_analysis_dual_writes(temp_db_url):
         )
         assert tool["tool_name"] == "langdetect"
         assert tool["status"] == "ok"
+
+    # Lecture hydratee : analysis reconstruit depuis la table
+    full = await db.get_article(int(art["id"]))
+    assert full["analysis_status"] == "ok"
+    assert full["article_meta"]["analysis"]["langdetect"]["language"] == "fr"
 
     await db.close()
 

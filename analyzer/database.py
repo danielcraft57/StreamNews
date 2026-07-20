@@ -71,6 +71,13 @@ class Database:
         ):
             if key in data and data[key] is not None and hasattr(data[key], 'isoformat'):
                 data[key] = data[key].isoformat()
+        # Statut analyse : colonne d'abord (source de verite)
+        if data.get("analysis_status") and isinstance(data.get("article_meta"), dict):
+            data["article_meta"].setdefault("analysis_status", data["analysis_status"])
+            if data.get("analysis_error"):
+                data["article_meta"].setdefault("analysis_error", data["analysis_error"])
+            if data.get("analyzed_at"):
+                data["article_meta"].setdefault("analyzed_at", data["analyzed_at"])
         return data
 
     @staticmethod
@@ -505,12 +512,14 @@ class Database:
                 site_id
             )
             if row:
-                return self._row_to_dict(row)
+                site = self._row_to_dict(row)
+                from repositories.normalized_read import hydrate_site
+
+                return await hydrate_site(conn, site, is_sqlite=self.is_sqlite)
             return None
 
     async def delete_site(self, site_id: int) -> Optional[Dict]:
-        """Supprime un site ; pages + articles partent via ON DELETE CASCADE.
-        Les feeds (JSONB sur sites/pages) disparaissent avec."""
+        """Supprime un site ; pages + articles partent via ON DELETE CASCADE."""
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 site = await conn.fetchrow("SELECT * FROM sites WHERE id = $1", site_id)
@@ -523,6 +532,9 @@ class Database:
                     "SELECT COUNT(*) FROM pages WHERE site_id = $1", site_id
                 )
                 data = self._row_to_dict(site)
+                from repositories.normalized_read import hydrate_site
+
+                data = await hydrate_site(conn, data, is_sqlite=self.is_sqlite)
                 await conn.execute("DELETE FROM sites WHERE id = $1", site_id)
                 return {
                     "site": data,
@@ -538,7 +550,13 @@ class Database:
         """Récupère tous les sites analysés"""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("SELECT * FROM sites ORDER BY created_at DESC")
-            return [self._row_to_dict(row) for row in rows]
+            from repositories.normalized_read import hydrate_site
+
+            out = []
+            for row in rows:
+                site = self._row_to_dict(row)
+                out.append(await hydrate_site(conn, site, is_sqlite=self.is_sqlite))
+            return out
 
     async def get_site_pages(self, site_id: int) -> List[Dict]:
         """Récupère toutes les pages d'un site"""
@@ -559,9 +577,10 @@ class Database:
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
-                SELECT id, site_id, feed_url, title, link, summary, author,
+                SELECT id, site_id, feed_id, feed_url, title, link, summary, author,
                        published_at, guid, dedupe_key, fetched_at,
-                       images, article_meta, enriched_at, enrich_status, enrich_error
+                       images, article_meta, enriched_at, enrich_status, enrich_error,
+                       analysis_status, analysis_error, analyzed_at
                 FROM articles
                 WHERE site_id = $1
                 {order}
@@ -570,7 +589,12 @@ class Database:
                 site_id,
                 limit,
             )
-            return [self._row_to_dict(row) for row in rows]
+            articles = [self._row_to_dict(row) for row in rows]
+            from repositories.normalized_read import hydrate_articles_batch
+
+            return await hydrate_articles_batch(
+                conn, articles, is_sqlite=self.is_sqlite, with_analyses=False
+            )
 
     async def get_article(self, article_id: int) -> Optional[Dict]:
         """Detail d'un article (contenu enrichi inclus)."""
@@ -579,9 +603,12 @@ class Database:
                 "SELECT * FROM articles WHERE id = $1",
                 article_id,
             )
-            if row:
-                return self._row_to_dict(row)
-            return None
+            if not row:
+                return None
+            article = self._row_to_dict(row)
+            from repositories.normalized_read import hydrate_article
+
+            return await hydrate_article(conn, article, is_sqlite=self.is_sqlite)
 
     async def list_articles_needing_enrichment(
         self, site_id: int, limit: int = 50
@@ -610,72 +637,43 @@ class Database:
     async def list_articles_needing_analysis(
         self, site_id: int, limit: int = 50
     ) -> List[Dict]:
-        """Articles enrichis sans analyse texte ok."""
+        """Articles enrichis sans analyse texte ok (colonne analysis_status)."""
         order = (
             "ORDER BY enriched_at DESC, fetched_at DESC"
             if self.is_sqlite
             else "ORDER BY enriched_at DESC NULLS LAST, fetched_at DESC"
         )
         async with self.pool.acquire() as conn:
-            if self.is_sqlite:
-                rows = await conn.fetch(
-                    f"""
-                    SELECT id, link, enrich_status, article_meta
-                    FROM articles
-                    WHERE site_id = $1
-                      AND enrich_status = 'ok'
-                      AND COALESCE(content_text, '') != ''
-                      AND (
-                        article_meta IS NULL
-                        OR json_extract(article_meta, '$.analysis_status') IS NULL
-                        OR json_extract(article_meta, '$.analysis_status') NOT IN ('ok', 'pending')
-                      )
-                    {order}
-                    LIMIT $2
-                    """,
-                    site_id,
-                    limit,
-                )
-            else:
-                rows = await conn.fetch(
-                    f"""
-                    SELECT id, link, enrich_status, article_meta
-                    FROM articles
-                    WHERE site_id = $1
-                      AND enrich_status = 'ok'
-                      AND COALESCE(content_text, '') <> ''
-                      AND (
-                        article_meta IS NULL
-                        OR COALESCE(article_meta->>'analysis_status', '') NOT IN ('ok', 'pending')
-                      )
-                    {order}
-                    LIMIT $2
-                    """,
-                    site_id,
-                    limit,
-                )
+            rows = await conn.fetch(
+                f"""
+                SELECT id, link, enrich_status, analysis_status
+                FROM articles
+                WHERE site_id = $1
+                  AND enrich_status = 'ok'
+                  AND COALESCE(content_text, '') != ''
+                  AND (
+                    analysis_status IS NULL
+                    OR analysis_status NOT IN ('ok', 'pending')
+                  )
+                {order}
+                LIMIT $2
+                """,
+                site_id,
+                limit,
+            )
             return [self._row_to_dict(row) for row in rows]
 
     async def set_article_analysis_pending(self, article_id: int) -> None:
+        """Colonne analysis_status = source de verite (JSON legacy allégé)."""
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT article_meta FROM articles WHERE id = $1",
-                article_id,
-            )
-            meta = self._parse_json_field(row["article_meta"]) if row else {}
-            meta = meta if isinstance(meta, dict) else {}
-            meta["analysis_status"] = "pending"
-            meta["analysis_error"] = None
             await conn.execute(
                 """
                 UPDATE articles SET
-                    article_meta = $2,
                     analysis_status = 'pending',
                     analysis_error = NULL
                 WHERE id = $1
                 """,
                 article_id,
-                json.dumps(meta),
             )
 
     async def update_article_analysis(
@@ -687,51 +685,34 @@ class Database:
         analysis_error: Optional[str] = None,
         analyzed_at: Optional[str] = None,
     ) -> None:
-        """Persiste les resultats d'analyse texte dans article_meta."""
+        """Persiste l'analyse dans colonnes + article_analyses (pas le blob JSON)."""
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT article_meta FROM articles WHERE id = $1",
-                article_id,
-            )
-            meta = self._parse_json_field(row["article_meta"]) if row else {}
-            meta = meta if isinstance(meta, dict) else {}
-            if analysis is not None:
-                existing_analysis = meta.get("analysis") or {}
-                merged_analysis = dict(existing_analysis)
-                for tool_name, block in analysis.items():
-                    if isinstance(block, dict):
-                        merged_analysis[tool_name] = block
-                meta["analysis"] = merged_analysis
-            meta["analysis_status"] = analysis_status
-            meta["analysis_error"] = analysis_error
-            if analyzed_at:
-                meta["analyzed_at"] = analyzed_at
             await conn.execute(
                 """
                 UPDATE articles SET
-                    article_meta = $2,
-                    analysis_status = $3,
-                    analysis_error = $4,
-                    analyzed_at = COALESCE($5, analyzed_at)
+                    analysis_status = $2,
+                    analysis_error = $3,
+                    analyzed_at = COALESCE($4, analyzed_at)
                 WHERE id = $1
                 """,
                 article_id,
-                json.dumps(meta),
                 analysis_status,
                 analysis_error,
                 analyzed_at,
             )
-            from repositories.normalized_sync import has_normalized_tables, sync_article_after_analysis
+            from repositories.normalized_sync import (
+                has_normalized_tables,
+                sync_article_analyses,
+            )
 
-            if await has_normalized_tables(conn, is_sqlite=self.is_sqlite):
-                await sync_article_after_analysis(
+            if analysis is not None and await has_normalized_tables(
+                conn, is_sqlite=self.is_sqlite
+            ):
+                await sync_article_analyses(
                     conn,
                     is_sqlite=self.is_sqlite,
                     article_id=article_id,
-                    meta=meta,
-                    analysis_status=analysis_status,
-                    analysis_error=analysis_error,
-                    analyzed_at=analyzed_at or meta.get("analyzed_at"),
+                    analysis=analysis,
                 )
 
     async def set_article_enrich_pending(self, article_id: int) -> None:

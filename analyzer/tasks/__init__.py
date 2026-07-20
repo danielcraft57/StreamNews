@@ -514,7 +514,8 @@ def analyze_article_task(
                 return {"article_id": article_id, "status": "missing"}
 
             meta = article.get("article_meta") or {}
-            if meta.get("analysis_status") == "ok" and not force and not tools:
+            status = article.get("analysis_status") or meta.get("analysis_status")
+            if status == "ok" and not force and not tools:
                 return {
                     "article_id": article_id,
                     "status": "ok",

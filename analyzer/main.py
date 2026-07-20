@@ -330,7 +330,8 @@ async def analyze_article(
 
         meta = article.get("article_meta") or {}
         tool_list = [t.strip() for t in tools.split(",") if t.strip()] if tools else None
-        if meta.get("analysis_status") == "ok" and not force and not tool_list:
+        status = article.get("analysis_status") or meta.get("analysis_status")
+        if status == "ok" and not force and not tool_list:
             return {
                 "article_id": article_id,
                 "site_id": article.get("site_id"),

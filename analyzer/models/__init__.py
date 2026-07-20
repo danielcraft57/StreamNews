@@ -6,6 +6,15 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from models.entities import (
+    ArticleAnalysisRecord,
+    ArticleImageRecord,
+    ArticleKeywordRecord,
+    ArticleMetaNormRecord,
+    ArticleRecord,
+    RssFeedRecord,
+)
+
 
 class FeedRef(BaseModel):
     url: str
@@ -54,3 +63,19 @@ class PipelineSummary(BaseModel):
     rss_count: int = 0
     articles_count: int = 0
     pages_analyzed: int = 0
+
+
+__all__ = [
+    "FeedRef",
+    "PageSnapshot",
+    "ArticleCandidate",
+    "CrawlResult",
+    "IngestFeedResult",
+    "PipelineSummary",
+    "RssFeedRecord",
+    "ArticleImageRecord",
+    "ArticleKeywordRecord",
+    "ArticleAnalysisRecord",
+    "ArticleMetaNormRecord",
+    "ArticleRecord",
+]
