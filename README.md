@@ -82,10 +82,10 @@ La CI GitHub Actions lance unitaires + e2e (services Postgres/Redis, stack compl
 
 ## CI/CD (GitHub Actions)
 
-- **CI** (`.github/workflows/ci.yml`) : sur push/PR `main` - tests unit + integration + e2e
-- **Deploy** (`.github/workflows/deploy.yml`) : **apres CI verte** (`workflow_run`) - SSH bastion node12 → flotte
+- **Tests** (`.github/workflows/ci.yml`) : sur push/PR `main` - unitaires + integration + e2e
+- **Mise en ligne** (`.github/workflows/deploy.yml`) : **apres Tests verts** - SSH node12 → flotte
 
-Pas de double CI : Deploy n'attend que le resultat de CI, il ne relance pas les tests.
+Pas de double run : la mise en ligne attend juste le resultat des Tests.
 
 Secrets / variables (Settings → Actions) — **bastion = node12**, pas node7 :
 
