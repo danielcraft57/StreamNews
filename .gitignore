@@ -1,7 +1,7 @@
 # Deps
 node_modules/
-e2e/node_modules/
 web/node_modules/
+e2e/node_modules/
 __pycache__/
 **/__pycache__/
 *.py[cod]
@@ -34,13 +34,14 @@ ENV/
 id_rsa*
 id_ed25519*
 *.secret
+*.env.bak
 credentials.json
 secrets/
-*.env.bak
 
-# Notes locales agents (hors repo public)
+# Notes locales agents / IDE Cursor (hors repo public)
 AGENTS.md
 .cursorrules.local
+.cursor/
 
 # IDE / OS
 .vscode/
@@ -51,19 +52,18 @@ AGENTS.md
 .DS_Store
 Thumbs.db
 Desktop.ini
-.cursor/
 
 # Logs / runtime
 logs/*
 !logs/.gitkeep
 *.log
+nohup.out
 pids/
 *.pid
 *.seed
 *.pid.lock
 npm-debug.log*
 yarn-error.log*
-nohup.out
 
 # Coverage / tests / caches outils
 coverage/

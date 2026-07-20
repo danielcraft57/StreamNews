@@ -11,15 +11,15 @@ Analyseur de flux RSS. Crawl un site, detecte les feeds RSS/Atom, suit la progre
 | `web/` | Express + UI + WebSocket (port 3000) |
 | `analyzer/` | FastAPI + crawl RSS + Celery (port 8000) |
 | DB | **Postgres** (prod / CI) ou **SQLite** (dev local) |
-| Redis | Broker Celery (homelab node6, ou node13 en local) |
+| Redis | Broker Celery (homelab data, ou Redis distant en local) |
 
 Pas de Docker.
 
 ## Prerequis
 
 - Python 3.11+, Node.js 18+
-- Redis accessible (local ou LAN)
-- Postgres 15+ **seulement** en mode prod / CI (le mode local utilise SQLite)
+- Redis accessible
+- Postgres 15+ pour prod / CI (le mode local utilise SQLite)
 
 ## Installation locale
 
@@ -27,13 +27,13 @@ Deux modes (fichiers d'env **non** versionnes) :
 
 | Mode | Fichier | DB | Redis |
 |------|---------|-----|-------|
-| **Local** | `.env.local` | SQLite (`data/streamnews.db`) | ex. `node13.lan` |
+| **Local** | `.env.local` | SQLite (`data/streamnews.db`) | ex. un Pi Redis |
 | **Prod-like** | `.env` | Postgres | localhost ou homelab |
 
 ```bash
 bash scripts/install.sh
 
-# Local (SQLite + Redis distant)
+# Local (SQLite)
 cp .env.local.example .env.local   # si pas deja cree par install.sh
 # adapte REDIS_URL si besoin
 bash scripts/init-db.sh --local
@@ -81,9 +81,9 @@ Ne committe **jamais** :
 - `data/*.db` (et fichiers `-wal` / `-shm`)
 - cles SSH, certificats, mots de passe reels
 
-Les setups homelab / VPS exigent `POSTGRES_PASSWORD=…` en argument : plus de defaut `streamnews123` en prod.
+Les setups homelab / VPS exigent `POSTGRES_PASSWORD=…` en argument : **pas** de defaut type `streamnews123` en prod.
 
-Le mot de passe `streamnews123` n'existe que dans la **CI GitHub** (Postgres ephemere) et `scripts/e2e-stack.sh`.
+Le mot de passe `streamnews123` n'existe que dans la **CI GitHub** (Postgres ephemere) et comme defaut de `scripts/e2e-stack.sh`.
 
 ## Architecture analyzer
 
@@ -91,16 +91,16 @@ Voir [analyzer/ARCHITECTURE.md](analyzer/ARCHITECTURE.md) (services, queues, SQL
 
 ## Homelab multi-Pi
 
-Detail : [deploy/HOMELAB.md](deploy/HOMELAB.md) — index deploy : [deploy/README.md](deploy/README.md).
+Detail : [deploy/HOMELAB.md](deploy/HOMELAB.md) — index : [deploy/README.md](deploy/README.md).
 
-| Noeud | Role |
-|-------|------|
+| Noeud (exemple) | Role |
+|-----------------|------|
 | **node6** | Postgres + Redis (`data`) |
 | **node7** | web + analyzer (`app`, pas de worker) |
 | **node8+** | workers Celery |
-| **node9** | bastion SSH (CD) |
+| **node9** | bastion SSH (CD, secret `DEPLOY_HOST`) |
 | **node12** | edge nginx / TLS public |
-| **node13** | Redis pour le mode local PC |
+| **node13** | Redis optionnel pour le mode local PC |
 
 ## Deploy VPS all-in-one
 

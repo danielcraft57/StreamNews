@@ -6,7 +6,7 @@ Scripts d'install et de mise en ligne (homelab multi-Pi ou VPS unique). **Pas de
 
 | Fichier | Contenu |
 |---------|---------|
-| [HOMELAB.md](HOMELAB.md) | Roles node6/7/8/9/12/13, install, CD, limites |
+| [HOMELAB.md](HOMELAB.md) | Roles, install, CD, limites |
 | [../README.md](../README.md) | Install locale (SQLite / Postgres) |
 | [../analyzer/ARCHITECTURE.md](../analyzer/ARCHITECTURE.md) | Pipelines Celery, backends DB |
 
