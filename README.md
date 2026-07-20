@@ -1,5 +1,7 @@
 # StreamNews
 
+**Version 0.2.0**
+
 Analyseur de flux RSS. Crawl un site, detecte les feeds RSS/Atom, suit la progression en temps reel via WebSocket.
 
 ## Stack

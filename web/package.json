@@ -1,6 +1,6 @@
 {
   "name": "streamnews-web",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "Interface web pour StreamNews RSS Analyzer",
   "main": "server.js",
   "scripts": {
