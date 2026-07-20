@@ -8,7 +8,7 @@ set -euo pipefail
 
 APP_DIR="${DEPLOY_PATH:-/opt/streamnews}"
 APP_USER="${DEPLOY_APP_USER:-streamnews}"
-REPO_URL="${REPO_URL:-https://github.com/loupix57/StreamNews.git}"
+REPO_URL="${REPO_URL:-https://github.com/danielcraft57/StreamNews.git}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 DATA_HOST="${DATA_HOST:-node6.lan}"
 WEB_HOST="${WEB_HOST:-node7.lan}"
