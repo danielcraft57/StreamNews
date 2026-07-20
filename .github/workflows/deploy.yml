@@ -1,7 +1,10 @@
 name: Deploy
 
+# CD : attend la fin de CI (pas de 2e run e2e).
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -10,26 +13,46 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  ci:
-    uses: ./.github/workflows/ci.yml
-
   deploy:
-    needs: ci
     runs-on: ubuntu-latest
-    # Skip tant que ENABLE_DEPLOY != true
-    if: ${{ vars.ENABLE_DEPLOY == 'true' }}
+    # Seulement si CI OK (ou lancement manuel) + ENABLE_DEPLOY
+    if: >
+      vars.ENABLE_DEPLOY == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       github.event.workflow_run.conclusion == 'success')
     env:
-      # Bastion = node12 (IP publique ou hostname joignable depuis GitHub)
-      # Flotte LAN derriere le bastion
       FLEET_HOSTS: ${{ vars.FLEET_HOSTS }}
       FLEET_USER: ${{ vars.FLEET_USER }}
     steps:
+      - name: Normalize SSH host
+        id: ssh
+        env:
+          RAW_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          H="${RAW_HOST}"
+          H="${H#https://}"
+          H="${H#http://}"
+          H="${H#tcp://}"
+          H="${H%%/*}"
+          # hostname:port -> hostname (SSH utilise port 22 par defaut)
+          if [[ "$H" == *:* ]]; then
+            H="${H%%:*}"
+          fi
+          if [[ -z "$H" ]]; then
+            echo "DEPLOY_HOST secret vide ou invalide"
+            exit 1
+          fi
+          echo "host=$H" >> "$GITHUB_OUTPUT"
+          echo "SSH host normalise: $H"
+
       - name: Deploy fleet via bastion (node12)
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.2
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
+          host: ${{ steps.ssh.outputs.host }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: 22
           envs: FLEET_HOSTS,FLEET_USER,DEPLOY_PATH,DEPLOY_PATH_EDGE
           script: |
             set -euo pipefail

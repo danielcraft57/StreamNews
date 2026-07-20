@@ -82,8 +82,10 @@ La CI GitHub Actions lance unitaires + e2e (services Postgres/Redis, stack compl
 
 ## CI/CD (GitHub Actions)
 
-- **CI** (`.github/workflows/ci.yml`) : sur push/PR `main` - install Python/Node + smoke checks
-- **Deploy** (`.github/workflows/deploy.yml`) : sur push `main` - CI puis SSH + `deploy/deploy.sh`
+- **CI** (`.github/workflows/ci.yml`) : sur push/PR `main` - tests unit + integration + e2e
+- **Deploy** (`.github/workflows/deploy.yml`) : **apres CI verte** (`workflow_run`) - SSH bastion node12 → flotte
+
+Pas de double CI : Deploy n'attend que le resultat de CI, il ne relance pas les tests.
 
 Secrets / variables (Settings → Actions) — **bastion = node12**, pas node7 :
 
@@ -92,12 +94,12 @@ Secrets / variables (Settings → Actions) — **bastion = node12**, pas node7 :
 | Variable | `ENABLE_DEPLOY` | `true` |
 | Variable | `FLEET_HOSTS` | `node6.lan node7.lan node8.lan` |
 | Variable | `FLEET_USER` | `pi` |
-| Secret | `DEPLOY_HOST` | IP publique de **node12** |
+| Secret | `DEPLOY_HOST` | IP publique de **node12**, ou hostname SSH (`streamnews.danielcraft.fr`) **sans** `https://` |
 | Secret | `DEPLOY_USER` | `pi` |
 | Secret | `DEPLOY_SSH_KEY` | cle privee SSH |
 | Secret | `DEPLOY_PATH` | `/opt/streamnews` |
 
-Depuis node12, Actions lance `deploy/deploy-fleet.sh` qui SSH vers chaque Pi du LAN et execute `deploy/deploy.sh` (role lu dans le `.env` local : data / app / worker).
+Deploy demarre seulement apres une CI `success` sur `main` (plus de 2e e2e).
 
 Repo : https://github.com/danielcraft57/StreamNews
 
