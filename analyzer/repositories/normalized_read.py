@@ -34,9 +34,9 @@ def _iso(value: Any) -> Any:
 async def load_article_images(conn, article_id: int) -> List[Dict[str, Any]]:
     rows = await conn.fetch(
         """
-        SELECT url, alt, source, is_primary, sort_order
-        FROM article_images
-        WHERE article_id = $1
+        SELECT url, alt, source, is_primary, sort_order, media_type
+        FROM article_media
+        WHERE article_id = $1 AND media_type = 'image'
         ORDER BY sort_order ASC, id ASC
         """,
         article_id,
@@ -49,9 +49,24 @@ async def load_article_images(conn, article_id: int) -> List[Dict[str, Any]]:
                 "alt": row["alt"] or "",
                 "source": row["source"] or "legacy",
                 "is_primary": bool(row["is_primary"]),
+                "media_type": "image",
             }
         )
     return out
+
+
+async def load_article_media(conn, article_id: int) -> List[Dict[str, Any]]:
+    rows = await conn.fetch(
+        """
+        SELECT media_type, url, mime_type, title, alt, source, thumbnail_url,
+               duration_ms, width, height, is_primary, sort_order
+        FROM article_media
+        WHERE article_id = $1
+        ORDER BY sort_order ASC, id ASC
+        """,
+        article_id,
+    )
+    return [dict(r) for r in rows]
 
 
 async def load_article_keywords(conn, article_id: int) -> List[Dict[str, str]]:
@@ -242,24 +257,27 @@ async def hydrate_articles_batch(
 
     img_rows = await conn.fetch(
         f"""
-        SELECT article_id, url, alt, source, is_primary, sort_order
-        FROM article_images
+        SELECT article_id, url, alt, source, is_primary, sort_order, media_type
+        FROM article_media
         WHERE article_id IN ({placeholders})
         ORDER BY sort_order ASC, id ASC
         """,
         *ids,
     )
     images_by: Dict[int, List[Dict[str, Any]]] = {}
+    media_by: Dict[int, List[Dict[str, Any]]] = {}
     for row in img_rows:
         aid = int(row["article_id"])
-        images_by.setdefault(aid, []).append(
-            {
-                "url": row["url"],
-                "alt": row["alt"] or "",
-                "source": row["source"] or "legacy",
-                "is_primary": bool(row["is_primary"]),
-            }
-        )
+        item = {
+            "url": row["url"],
+            "alt": row["alt"] or "",
+            "source": row["source"] or "legacy",
+            "is_primary": bool(row["is_primary"]),
+            "media_type": row.get("media_type") or "image",
+        }
+        media_by.setdefault(aid, []).append(item)
+        if item["media_type"] == "image":
+            images_by.setdefault(aid, []).append(item)
 
     kw_rows = await conn.fetch(
         f"""
@@ -316,6 +334,9 @@ async def hydrate_articles_batch(
             article["images"] = imgs
         elif not isinstance(article.get("images"), list):
             article["images"] = []
+        article["media"] = media_by.get(aid, article.get("images") or [])
+        article["videos"] = [m for m in article["media"] if m.get("media_type") == "video"]
+        article["audios"] = [m for m in article["media"] if m.get("media_type") == "audio"]
 
         article["article_meta"] = rebuild_article_meta(
             meta_norm=norm_by.get(aid),

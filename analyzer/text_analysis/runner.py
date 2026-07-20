@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional
 
 from text_analysis.base import TextAnalyzer, error_result
+from text_analysis.face_detect import FaceDetectAnalyzer
 from text_analysis.keywords_yake import YakeKeywordsAnalyzer
 from text_analysis.lang_detect import LangDetectAnalyzer
 from text_analysis.ner_spacy import SpacyNerAnalyzer
@@ -16,6 +17,7 @@ _BUILTIN_ANALYZERS: List[TextAnalyzer] = [
     SimhashAnalyzer(),
     SumySummaryAnalyzer(),
     SpacyNerAnalyzer(),
+    FaceDetectAnalyzer(),
 ]
 
 _REGISTRY: Dict[str, TextAnalyzer] = {a.name: a for a in _BUILTIN_ANALYZERS}

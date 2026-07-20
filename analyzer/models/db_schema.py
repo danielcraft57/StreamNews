@@ -5,9 +5,11 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     MetaData,
     String,
     Table,
@@ -119,8 +121,8 @@ articles = Table(
     Index("idx_articles_feed", "feed_id"),
 )
 
-article_images = Table(
-    "article_images",
+article_media = Table(
+    "article_media",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column(
@@ -129,13 +131,97 @@ article_images = Table(
         ForeignKey("articles.id", ondelete="CASCADE"),
         nullable=False,
     ),
+    Column("media_type", String(20), nullable=False, server_default="image"),
     Column("url", String(2000), nullable=False),
+    Column("mime_type", String(100)),
+    Column("title", String(500)),
     Column("alt", String(500)),
     Column("source", String(50)),
+    Column("thumbnail_url", String(2000)),
+    Column("duration_ms", Integer),
+    Column("width", Integer),
+    Column("height", Integer),
     Column("is_primary", Boolean, nullable=False, server_default="0"),
     Column("sort_order", Integer, nullable=False, server_default="0"),
-    Index("idx_article_images_article", "article_id"),
-    UniqueConstraint("article_id", "url", name="article_images_article_id_url_key"),
+    Column("extra", JsonDocument, nullable=False, server_default="{}"),
+    Index("idx_article_media_article", "article_id"),
+    Index("idx_article_media_article_type", "article_id", "media_type"),
+    UniqueConstraint("article_id", "url", name="article_media_article_id_url_key"),
+)
+
+persons = Table(
+    "persons",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("display_name", String(500)),
+    Column("created_at", DateTime, server_default=func.now()),
+    Column("meta", JsonDocument, nullable=False, server_default="{}"),
+)
+
+article_entities = Table(
+    "article_entities",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "article_id",
+        Integer,
+        ForeignKey("articles.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("text", String(500), nullable=False),
+    Column("label", String(100), nullable=False),
+    Column("start_char", Integer),
+    Column("end_char", Integer),
+    Column("source", String(50), nullable=False, server_default="ner_spacy"),
+    Column(
+        "person_id",
+        Integer,
+        ForeignKey("persons.id", ondelete="SET NULL"),
+    ),
+    UniqueConstraint(
+        "article_id",
+        "text",
+        "label",
+        "source",
+        name="article_entities_article_text_label_source_key",
+    ),
+    Index("idx_article_entities_article", "article_id"),
+    Index("idx_article_entities_person", "person_id"),
+)
+
+article_faces = Table(
+    "article_faces",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "article_id",
+        Integer,
+        ForeignKey("articles.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column(
+        "media_id",
+        Integer,
+        ForeignKey("article_media.id", ondelete="SET NULL"),
+    ),
+    Column(
+        "person_id",
+        Integer,
+        ForeignKey("persons.id", ondelete="SET NULL"),
+    ),
+    Column("bbox_x", Float),
+    Column("bbox_y", Float),
+    Column("bbox_w", Float),
+    Column("bbox_h", Float),
+    Column("bbox_unit", String(20), nullable=False, server_default="ratio"),
+    Column("confidence", Float),
+    Column("embedding", LargeBinary),
+    Column("embedding_dim", Integer),
+    Column("tool_name", String(100), nullable=False, server_default="face_detect"),
+    Column("detected_at", DateTime),
+    Index("idx_article_faces_article", "article_id"),
+    Index("idx_article_faces_media", "media_id"),
+    Index("idx_article_faces_person", "person_id"),
 )
 
 article_keywords = Table(

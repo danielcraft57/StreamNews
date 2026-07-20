@@ -129,28 +129,77 @@ def keyword_rows(meta: Dict[str, Any], article_id: int) -> List[Tuple[int, str, 
     return rows
 
 
-def image_rows(images: Any, article_id: int, meta: Dict[str, Any]) -> List[Tuple]:
-    if not isinstance(images, list):
-        images = []
+def media_rows(
+    items: Any,
+    article_id: int,
+    meta: Dict[str, Any],
+    *,
+    default_type: str = "image",
+) -> List[Tuple]:
+    if not isinstance(items, list):
+        items = []
     primary_url = meta.get("primary_image")
-    rows = []
-    for idx, img in enumerate(images):
-        if isinstance(img, str):
-            url, alt, source = img, "", "legacy"
-        elif isinstance(img, dict):
-            url = img.get("url")
-            alt = img.get("alt") or ""
-            source = img.get("source") or "legacy"
+    rows: List[Tuple] = []
+    for idx, item in enumerate(items):
+        if isinstance(item, str):
+            url, alt, source = item, "", "legacy"
+            media_type, mime, title, thumb = default_type, None, None, None
+            duration_ms = width = height = None
+            extra = "{}"
+        elif isinstance(item, dict):
+            url = item.get("url")
+            alt = item.get("alt") or ""
+            source = item.get("source") or "legacy"
+            media_type = str(item.get("media_type") or item.get("type") or default_type)[:20]
+            if media_type not in ("image", "video", "audio"):
+                media_type = default_type
+            mime = (str(item["mime_type"])[:100] if item.get("mime_type") else None)
+            title = (str(item["title"])[:500] if item.get("title") else None)
+            thumb = (str(item["thumbnail_url"])[:2000] if item.get("thumbnail_url") else None)
+            duration_ms = item.get("duration_ms") if isinstance(item.get("duration_ms"), int) else None
+            width = item.get("width") if isinstance(item.get("width"), int) else None
+            height = item.get("height") if isinstance(item.get("height"), int) else None
+            extra_obj = item.get("extra") if isinstance(item.get("extra"), dict) else {}
+            extra = json.dumps(extra_obj) if extra_obj else "{}"
         else:
             continue
         if not url or not str(url).strip():
             continue
         url = str(url).strip()[:2000]
-        is_primary = bool(primary_url and str(primary_url).strip() == url) or idx == 0
-        rows.append((article_id, url, str(alt)[:500] or None, str(source)[:50] or None, is_primary, idx))
-    if rows and not any(r[4] for r in rows):
-        rows[0] = (rows[0][0], rows[0][1], rows[0][2], rows[0][3], True, rows[0][5])
+        is_primary = bool(primary_url and str(primary_url).strip() == url) or (
+            media_type == "image" and idx == 0 and default_type == "image"
+        )
+        rows.append(
+            (
+                article_id,
+                media_type,
+                url,
+                mime,
+                title,
+                str(alt)[:500] or None,
+                str(source)[:50] or None,
+                thumb,
+                duration_ms,
+                width,
+                height,
+                is_primary,
+                idx,
+                extra,
+            )
+        )
+    if rows and default_type == "image" and not any(r[11] for r in rows if r[1] == "image"):
+        for i, r in enumerate(rows):
+            if r[1] == "image":
+                rows[i] = (*r[:11], True, *r[12:])
+                break
     return rows
+
+
+def image_rows(images: Any, article_id: int, meta: Dict[str, Any]) -> List[Tuple]:
+    return [
+        (r[0], r[2], r[5], r[6], r[11], r[12])
+        for r in media_rows(images, article_id, meta, default_type="image")
+    ]
 
 
 def meta_norm_row(article_id: int, meta: Dict[str, Any]) -> Tuple:
@@ -184,6 +233,91 @@ def meta_norm_row(article_id: int, meta: Dict[str, Any]) -> Tuple:
     )
 
 
+async def sync_article_media(
+    conn,
+    *,
+    is_sqlite: bool,
+    article_id: int,
+    media_items: Any,
+    meta: Optional[Dict[str, Any]] = None,
+    default_type: str = "image",
+) -> None:
+    meta = meta if isinstance(meta, dict) else {}
+    # Compat migrations < 006 : table article_images encore presente
+    if is_sqlite:
+        probe = await conn.fetchrow(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='article_media'"
+        )
+        use_media = bool(probe)
+    else:
+        probe = await conn.fetchrow(
+            "SELECT to_regclass('public.article_media') IS NOT NULL AS ok"
+        )
+        use_media = bool(probe and probe.get("ok"))
+
+    if not use_media:
+        # Legacy article_images (images only)
+        for row in image_rows(media_items, article_id, meta):
+            if is_sqlite:
+                await conn.execute(
+                    """
+                    INSERT OR IGNORE INTO article_images
+                        (article_id, url, alt, source, is_primary, sort_order)
+                    SELECT $1, $2, $3, $4, $5, $6
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM article_images
+                        WHERE article_id = $1 AND url = $2
+                    )
+                    """,
+                    *row,
+                )
+            else:
+                await conn.execute(
+                    """
+                    INSERT INTO article_images
+                        (article_id, url, alt, source, is_primary, sort_order)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (article_id, url) DO NOTHING
+                    """,
+                    *row,
+                )
+        return
+
+    for row in media_rows(media_items, article_id, meta, default_type=default_type):
+        if is_sqlite:
+            await conn.execute(
+                """
+                INSERT OR IGNORE INTO article_media
+                    (article_id, media_type, url, mime_type, title, alt, source,
+                     thumbnail_url, duration_ms, width, height, is_primary, sort_order, extra)
+                SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM article_media
+                    WHERE article_id = $1 AND url = $3
+                )
+                """,
+                *row,
+            )
+        else:
+            await conn.execute(
+                """
+                INSERT INTO article_media
+                    (article_id, media_type, url, mime_type, title, alt, source,
+                     thumbnail_url, duration_ms, width, height, is_primary, sort_order, extra)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb)
+                ON CONFLICT (article_id, url) DO UPDATE SET
+                    media_type = EXCLUDED.media_type,
+                    mime_type = COALESCE(EXCLUDED.mime_type, article_media.mime_type),
+                    title = COALESCE(EXCLUDED.title, article_media.title),
+                    alt = COALESCE(EXCLUDED.alt, article_media.alt),
+                    source = COALESCE(EXCLUDED.source, article_media.source),
+                    thumbnail_url = COALESCE(EXCLUDED.thumbnail_url, article_media.thumbnail_url),
+                    is_primary = EXCLUDED.is_primary OR article_media.is_primary
+                """,
+                *row,
+            )
+
+
 async def sync_article_images(
     conn,
     *,
@@ -192,30 +326,110 @@ async def sync_article_images(
     images: Any,
     meta: Dict[str, Any],
 ) -> None:
-    for row in image_rows(images, article_id, meta):
+    await sync_article_media(
+        conn,
+        is_sqlite=is_sqlite,
+        article_id=article_id,
+        media_items=images,
+        meta=meta,
+        default_type="image",
+    )
+
+
+async def sync_article_entities(
+    conn,
+    *,
+    is_sqlite: bool,
+    article_id: int,
+    entities: Any,
+    source: str = "ner_spacy",
+) -> None:
+    if not isinstance(entities, list):
+        return
+    source = (source or "ner_spacy")[:50]
+    for ent in entities:
+        if isinstance(ent, str):
+            text, label = ent.strip(), "UNKNOWN"
+            start_char = end_char = None
+        elif isinstance(ent, dict):
+            text = str(ent.get("text") or ent.get("name") or "").strip()
+            label = str(ent.get("label") or ent.get("type") or "UNKNOWN")[:100]
+            start_char = ent.get("start_char") if isinstance(ent.get("start_char"), int) else None
+            end_char = ent.get("end_char") if isinstance(ent.get("end_char"), int) else None
+        else:
+            continue
+        if not text or len(text) > 500:
+            continue
         if is_sqlite:
             await conn.execute(
                 """
-                INSERT OR IGNORE INTO article_images
-                    (article_id, url, alt, source, is_primary, sort_order)
-                SELECT $1, $2, $3, $4, $5, $6
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM article_images
-                    WHERE article_id = $1 AND url = $2
-                )
+                INSERT OR IGNORE INTO article_entities
+                    (article_id, text, label, start_char, end_char, source)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 """,
-                *row,
+                article_id,
+                text[:500],
+                label,
+                start_char,
+                end_char,
+                source,
             )
         else:
             await conn.execute(
                 """
-                INSERT INTO article_images
-                    (article_id, url, alt, source, is_primary, sort_order)
+                INSERT INTO article_entities
+                    (article_id, text, label, start_char, end_char, source)
                 VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (article_id, url) DO NOTHING
+                ON CONFLICT (article_id, text, label, source) DO NOTHING
                 """,
-                *row,
+                article_id,
+                text[:500],
+                label,
+                start_char,
+                end_char,
+                source,
             )
+
+
+async def sync_article_faces(
+    conn,
+    *,
+    is_sqlite: bool,
+    article_id: int,
+    faces: Any,
+    tool_name: str = "face_detect",
+) -> None:
+    if not isinstance(faces, list):
+        return
+    tool = (tool_name or "face_detect")[:100]
+    for face in faces:
+        if not isinstance(face, dict):
+            continue
+        bbox = face.get("bbox") if isinstance(face.get("bbox"), dict) else {}
+        embedding = face.get("embedding")
+        if embedding is not None and not isinstance(embedding, (bytes, bytearray)):
+            embedding = None
+        await conn.execute(
+            """
+            INSERT INTO article_faces
+                (article_id, media_id, person_id, bbox_x, bbox_y, bbox_w, bbox_h,
+                 bbox_unit, confidence, embedding, embedding_dim, tool_name, detected_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            """,
+            article_id,
+            face.get("media_id"),
+            face.get("person_id"),
+            bbox.get("x", face.get("bbox_x")),
+            bbox.get("y", face.get("bbox_y")),
+            bbox.get("w", face.get("bbox_w")),
+            bbox.get("h", face.get("bbox_h")),
+            str(face.get("bbox_unit") or bbox.get("unit") or "ratio")[:20],
+            face.get("confidence"),
+            embedding,
+            face.get("embedding_dim"),
+            tool,
+            parse_dt(face.get("detected_at")),
+        )
 
 
 async def sync_article_keywords(
@@ -346,6 +560,26 @@ async def sync_article_analyses(
                 str(err)[:2000] if err else None,
                 analyzed_tool,
             )
+        # NER spaCy -> table article_entities
+        if tool in ("ner_spacy", "spacy") and status == "ok":
+            ents = result.get("entities") or block.get("entities")
+            await sync_article_entities(
+                conn,
+                is_sqlite=is_sqlite,
+                article_id=article_id,
+                entities=ents,
+                source="ner_spacy",
+            )
+        # Faces stub / outil visage
+        if tool in ("face_detect", "face_recognition", "insightface") and status == "ok":
+            faces = result.get("faces") or block.get("faces")
+            await sync_article_faces(
+                conn,
+                is_sqlite=is_sqlite,
+                article_id=article_id,
+                faces=faces,
+                tool_name=tool,
+            )
 
 
 async def sync_article_after_upsert(
@@ -357,6 +591,8 @@ async def sync_article_after_upsert(
     feed_url: str,
     images: Any,
     meta: Dict[str, Any],
+    videos: Any = None,
+    audios: Any = None,
 ) -> None:
     feed_id = await ensure_rss_feed(
         conn,
@@ -373,6 +609,14 @@ async def sync_article_after_upsert(
             feed_id,
         )
     await sync_article_images(conn, is_sqlite=is_sqlite, article_id=article_id, images=images, meta=meta)
+    if videos:
+        await sync_article_media(
+            conn, is_sqlite=is_sqlite, article_id=article_id, media_items=videos, meta=meta, default_type="video"
+        )
+    if audios:
+        await sync_article_media(
+            conn, is_sqlite=is_sqlite, article_id=article_id, media_items=audios, meta=meta, default_type="audio"
+        )
     await sync_article_keywords(conn, is_sqlite=is_sqlite, article_id=article_id, meta=meta)
     if meta:
         await sync_article_meta_norm(conn, is_sqlite=is_sqlite, article_id=article_id, meta=meta)
@@ -385,8 +629,18 @@ async def sync_article_after_enrichment(
     article_id: int,
     images: Any,
     meta: Dict[str, Any],
+    videos: Any = None,
+    audios: Any = None,
 ) -> None:
     await sync_article_images(conn, is_sqlite=is_sqlite, article_id=article_id, images=images, meta=meta)
+    if videos:
+        await sync_article_media(
+            conn, is_sqlite=is_sqlite, article_id=article_id, media_items=videos, meta=meta, default_type="video"
+        )
+    if audios:
+        await sync_article_media(
+            conn, is_sqlite=is_sqlite, article_id=article_id, media_items=audios, meta=meta, default_type="audio"
+        )
     await sync_article_keywords(conn, is_sqlite=is_sqlite, article_id=article_id, meta=meta)
     if meta:
         await sync_article_meta_norm(conn, is_sqlite=is_sqlite, article_id=article_id, meta=meta)

@@ -8,11 +8,16 @@ from pydantic import BaseModel, Field
 
 from models.entities import (
     ArticleAnalysisRecord,
+    ArticleEntityRecord,
+    ArticleFaceRecord,
     ArticleImageRecord,
     ArticleKeywordRecord,
+    ArticleMediaRecord,
     ArticleMetaNormRecord,
     ArticleRecord,
+    PersonRecord,
     RssFeedRecord,
+    SiteRecord,
 )
 
 
@@ -38,6 +43,8 @@ class ArticleCandidate(BaseModel):
     published_at: Optional[datetime] = None
     guid: Optional[str] = None
     images: List[Dict[str, Any]] = Field(default_factory=list)
+    videos: List[Dict[str, Any]] = Field(default_factory=list)
+    audios: List[Dict[str, Any]] = Field(default_factory=list)
     article_meta: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -74,7 +81,11 @@ __all__ = [
     "PipelineSummary",
     "RssFeedRecord",
     "ArticleImageRecord",
+    "ArticleMediaRecord",
     "ArticleKeywordRecord",
+    "ArticleEntityRecord",
+    "ArticleFaceRecord",
+    "PersonRecord",
     "ArticleAnalysisRecord",
     "ArticleMetaNormRecord",
     "ArticleRecord",

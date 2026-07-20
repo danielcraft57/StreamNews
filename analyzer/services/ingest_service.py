@@ -13,10 +13,12 @@ from models import ArticleCandidate, IngestFeedResult
 from utils import normalize_identifier, normalize_url
 from utils.rss_entry import (
     entry_article_meta,
+    entry_audios,
     entry_author,
     entry_images,
     entry_link,
     entry_summary,
+    entry_videos,
 )
 
 logger = get_logger(__name__)
@@ -53,6 +55,8 @@ class IngestService:
 
             summary = entry_summary(entry, max_len=self.summary_max_len)
             images = entry_images(entry)
+            videos = entry_videos(entry)
+            audios = entry_audios(entry)
             article_meta = entry_article_meta(entry)
             if link:
                 from urllib.parse import urlparse
@@ -71,6 +75,8 @@ class IngestService:
                     published_at=published_at,
                     guid=normalize_identifier(entry.get("id") or entry.get("guid")),
                     images=images,
+                    videos=videos,
+                    audios=audios,
                     article_meta=article_meta,
                 )
             )

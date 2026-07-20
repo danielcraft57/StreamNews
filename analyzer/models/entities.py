@@ -17,14 +17,27 @@ class RssFeedRecord(BaseModel):
     created_at: Optional[datetime] = None
 
 
-class ArticleImageRecord(BaseModel):
+class ArticleMediaRecord(BaseModel):
     id: Optional[int] = None
     article_id: int
+    media_type: str = "image"  # image | video | audio
     url: str
+    mime_type: Optional[str] = None
+    title: Optional[str] = None
     alt: Optional[str] = None
     source: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    duration_ms: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
     is_primary: bool = False
     sort_order: int = 0
+    extra: Dict[str, Any] = Field(default_factory=dict)
+
+
+# Alias compat
+class ArticleImageRecord(ArticleMediaRecord):
+    media_type: str = "image"
 
 
 class ArticleKeywordRecord(BaseModel):
@@ -32,6 +45,40 @@ class ArticleKeywordRecord(BaseModel):
     article_id: int
     keyword: str
     source: str = "unknown"
+
+
+class ArticleEntityRecord(BaseModel):
+    id: Optional[int] = None
+    article_id: int
+    text: str
+    label: str
+    start_char: Optional[int] = None
+    end_char: Optional[int] = None
+    source: str = "ner_spacy"
+    person_id: Optional[int] = None
+
+
+class PersonRecord(BaseModel):
+    id: Optional[int] = None
+    display_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    meta: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ArticleFaceRecord(BaseModel):
+    id: Optional[int] = None
+    article_id: int
+    media_id: Optional[int] = None
+    person_id: Optional[int] = None
+    bbox_x: Optional[float] = None
+    bbox_y: Optional[float] = None
+    bbox_w: Optional[float] = None
+    bbox_h: Optional[float] = None
+    bbox_unit: str = "ratio"
+    confidence: Optional[float] = None
+    embedding_dim: Optional[int] = None
+    tool_name: str = "face_detect"
+    detected_at: Optional[datetime] = None
 
 
 class ArticleAnalysisRecord(BaseModel):
@@ -53,6 +100,24 @@ class ArticleMetaNormRecord(BaseModel):
     primary_image_url: Optional[str] = None
     domain: Optional[str] = None
     extra: Dict[str, Any] = Field(default_factory=dict)
+
+
+def _media_api(m: ArticleMediaRecord) -> Dict[str, Any]:
+    return {
+        "id": m.id,
+        "media_type": m.media_type,
+        "url": m.url,
+        "mime_type": m.mime_type,
+        "title": m.title,
+        "alt": m.alt or "",
+        "source": m.source or "legacy",
+        "thumbnail_url": m.thumbnail_url,
+        "duration_ms": m.duration_ms,
+        "width": m.width,
+        "height": m.height,
+        "is_primary": m.is_primary,
+        "sort_order": m.sort_order,
+    }
 
 
 class ArticleRecord(BaseModel):
@@ -77,14 +142,22 @@ class ArticleRecord(BaseModel):
     analysis_error: Optional[str] = None
     analyzed_at: Optional[datetime] = None
     fetched_at: Optional[datetime] = None
-    images: List[ArticleImageRecord] = Field(default_factory=list)
+    media: List[ArticleMediaRecord] = Field(default_factory=list)
+    images: List[ArticleMediaRecord] = Field(default_factory=list)
     keywords: List[ArticleKeywordRecord] = Field(default_factory=list)
+    entities: List[ArticleEntityRecord] = Field(default_factory=list)
+    faces: List[ArticleFaceRecord] = Field(default_factory=list)
     analyses: List[ArticleAnalysisRecord] = Field(default_factory=list)
     meta_norm: Optional[ArticleMetaNormRecord] = None
 
     def to_api_dict(self) -> Dict[str, Any]:
-        """Shape attendu par le front / FastAPI (images + article_meta)."""
+        """Shape attendu par le front / FastAPI."""
         from repositories.normalized_read import rebuild_article_meta
+
+        media = self.media or self.images
+        images = [m for m in media if m.media_type == "image"]
+        videos = [m for m in media if m.media_type == "video"]
+        audios = [m for m in media if m.media_type == "audio"]
 
         meta = rebuild_article_meta(
             meta_norm=self.meta_norm.model_dump() if self.meta_norm else None,
@@ -107,7 +180,15 @@ class ArticleRecord(BaseModel):
             analyzed_at=self.analyzed_at,
             legacy_meta={},
         )
-        data = {
+        if self.entities:
+            meta["entities"] = [
+                {"text": e.text, "label": e.label, "source": e.source}
+                for e in self.entities
+            ]
+        if self.faces:
+            meta["faces_count"] = len(self.faces)
+
+        return {
             "id": self.id,
             "site_id": self.site_id,
             "feed_id": self.feed_id,
@@ -127,18 +208,38 @@ class ArticleRecord(BaseModel):
             "analysis_error": self.analysis_error,
             "analyzed_at": self.analyzed_at.isoformat() if self.analyzed_at else None,
             "fetched_at": self.fetched_at.isoformat() if self.fetched_at else None,
-            "images": [
+            "images": [_media_api(m) for m in images],
+            "videos": [_media_api(m) for m in videos],
+            "audios": [_media_api(m) for m in audios],
+            "media": [_media_api(m) for m in media],
+            "entities": [
                 {
-                    "url": img.url,
-                    "alt": img.alt or "",
-                    "source": img.source or "legacy",
-                    "is_primary": img.is_primary,
+                    "text": e.text,
+                    "label": e.label,
+                    "source": e.source,
+                    "person_id": e.person_id,
                 }
-                for img in self.images
+                for e in self.entities
+            ],
+            "faces": [
+                {
+                    "id": f.id,
+                    "media_id": f.media_id,
+                    "person_id": f.person_id,
+                    "bbox": {
+                        "x": f.bbox_x,
+                        "y": f.bbox_y,
+                        "w": f.bbox_w,
+                        "h": f.bbox_h,
+                        "unit": f.bbox_unit,
+                    },
+                    "confidence": f.confidence,
+                    "tool_name": f.tool_name,
+                }
+                for f in self.faces
             ],
             "article_meta": meta,
         }
-        return data
 
 
 class SiteRecord(BaseModel):

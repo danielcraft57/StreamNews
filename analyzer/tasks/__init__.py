@@ -341,6 +341,8 @@ def ingest_feed_task(site_id: int, feed_url: str) -> int:
                     published_at=art.published_at,
                     guid=art.guid,
                     images=art.images or None,
+                    videos=getattr(art, "videos", None) or None,
+                    audios=getattr(art, "audios", None) or None,
                     article_meta=art.article_meta or None,
                 )
                 n += 1
@@ -431,6 +433,8 @@ def enrich_article_task(article_id: int, force: bool = False) -> dict:
                     content_html=data.get("content_html") or "",
                     content_text=data.get("content_text") or "",
                     images=merged_images,
+                    videos=data.get("videos") or [],
+                    audios=data.get("audios") or [],
                     article_meta=merged_meta,
                     enrich_status="ok",
                     enrich_error=None,

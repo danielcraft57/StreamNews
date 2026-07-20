@@ -81,8 +81,9 @@ Detail secrets : README → section CI/CD.
 
 ## BDD - lectures (local + prod)
 
-Schema normalise (Alembic) : tables `rss_feeds`, `article_images`, `article_keywords`,
-`article_analyses`, `article_meta_norm`. Peu de JSON (meta residuel seulement).
+Schema normalise (Alembic) : tables `rss_feeds`, `article_media` (image/video/audio),
+`article_keywords`, `article_analyses`, `article_meta_norm`, `article_entities` (spaCy),
+`persons` + `article_faces` (reco faciale, lib pluggable via `FACE_DETECT_BACKEND`).
 
 | Environnement | Outil / pratique |
 |---------------|------------------|
@@ -91,3 +92,5 @@ Schema normalise (Alembic) : tables `rss_feeds`, `article_images`, `article_keyw
 | **Les deux** | Filtrer sur colonnes (`analysis_status`, `enrich_status`), hydrate batch (pas de N+1) |
 
 Apres un gros crawl : `ANALYZE` (SQLite) ou laisser autovacuum (Postgres).
+
+Visages : tables pretes ; stub `face_detect` jusqu'a brancher InsightFace ou face_recognition.

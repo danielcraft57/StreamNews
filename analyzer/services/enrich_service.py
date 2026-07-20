@@ -472,10 +472,85 @@ def _images_from_html(html: str, base_url: str, limit: int = 12) -> List[Dict[st
             "url": abs_url,
             "alt": (img.get("alt") or "")[:300],
             "source": "content",
+            "media_type": "image",
         })
         if len(out) >= limit:
             break
     return out
+
+
+def _videos_from_html(html: str, base_url: str, limit: int = 6) -> List[Dict[str, Any]]:
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "lxml")
+    out: List[Dict[str, Any]] = []
+    seen = set()
+
+    def add(url: Optional[str], *, mime: Optional[str] = None, poster: Optional[str] = None) -> None:
+        if not url:
+            return
+        abs_url = urljoin(base_url, url.strip())
+        if not abs_url.startswith(("http://", "https://")) or abs_url in seen:
+            return
+        seen.add(abs_url)
+        item: Dict[str, Any] = {
+            "url": abs_url,
+            "media_type": "video",
+            "source": "content",
+        }
+        if mime:
+            item["mime_type"] = mime
+        if poster:
+            item["thumbnail_url"] = urljoin(base_url, poster.strip())
+        out.append(item)
+
+    for video in soup.find_all("video"):
+        poster = video.get("poster")
+        src = video.get("src")
+        if src:
+            add(src, poster=poster)
+        for source in video.find_all("source"):
+            add(source.get("src"), mime=source.get("type"), poster=poster)
+        if len(out) >= limit:
+            return out[:limit]
+
+    for iframe in soup.find_all("iframe"):
+        src = iframe.get("src") or ""
+        low = src.lower()
+        if any(x in low for x in ("youtube.com", "youtu.be", "vimeo.com", "dailymotion.com")):
+            add(src)
+        if len(out) >= limit:
+            break
+    return out[:limit]
+
+
+def _audios_from_html(html: str, base_url: str, limit: int = 6) -> List[Dict[str, Any]]:
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "lxml")
+    out: List[Dict[str, Any]] = []
+    seen = set()
+
+    def add(url: Optional[str], *, mime: Optional[str] = None) -> None:
+        if not url:
+            return
+        abs_url = urljoin(base_url, url.strip())
+        if not abs_url.startswith(("http://", "https://")) or abs_url in seen:
+            return
+        seen.add(abs_url)
+        item: Dict[str, Any] = {"url": abs_url, "media_type": "audio", "source": "content"}
+        if mime:
+            item["mime_type"] = mime
+        out.append(item)
+
+    for audio in soup.find_all("audio"):
+        if audio.get("src"):
+            add(audio.get("src"))
+        for source in audio.find_all("source"):
+            add(source.get("src"), mime=source.get("type"))
+        if len(out) >= limit:
+            break
+    return out[:limit]
 
 
 def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
@@ -487,6 +562,8 @@ def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
             "content_html": "",
             "content_text": "",
             "images": [],
+            "videos": [],
+            "audios": [],
             "article_meta": {},
         }
 
@@ -570,6 +647,9 @@ def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
     if primary and content_html:
         content_html = strip_primary_image_from_html(content_html, primary, base_url)
 
+    videos = _videos_from_html(html, base_url)
+    audios = _audios_from_html(html, base_url)
+
     article_meta = {
         k: v
         for k, v in merged.items()
@@ -590,6 +670,8 @@ def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
         "content_html": content_html,
         "content_text": content_text,
         "images": images[:20],
+        "videos": videos,
+        "audios": audios,
         "article_meta": article_meta,
     }
 

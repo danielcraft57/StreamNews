@@ -33,7 +33,7 @@ async def test_migration_002_creates_normalized_tables(temp_db_url):
             )
             names = {r["name"] for r in tables}
         assert "rss_feeds" in names
-        assert "article_images" in names
+        assert "article_media" in names
         assert "article_keywords" in names
         assert "article_analyses" in names
         assert "article_meta_norm" in names

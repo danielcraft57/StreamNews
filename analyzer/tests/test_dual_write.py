@@ -52,7 +52,7 @@ async def test_upsert_article_dual_writes_feed_and_images(temp_db_url):
         assert "feed.xml" in feed["url"]
 
         img_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM article_images WHERE article_id = $1",
+            "SELECT COUNT(*) FROM article_media WHERE article_id = $1 AND media_type = 'image'",
             art["id"],
         )
         assert img_count >= 1
@@ -63,11 +63,10 @@ async def test_upsert_article_dual_writes_feed_and_images(temp_db_url):
         )
         assert kw_count >= 1
 
-        # Plus de colonnes JSON legacy
-        cols = await conn.fetch("PRAGMA table_info(articles)")
-        names = {r["name"] for r in cols}
-        assert "images" not in names
-        assert "article_meta" not in names
+        tables = await conn.fetch("SELECT name FROM sqlite_master WHERE type='table'")
+        names = {r["name"] for r in tables}
+        assert "article_media" in names
+        assert "article_images" not in names
 
     await db.close()
 

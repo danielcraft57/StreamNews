@@ -128,6 +128,82 @@ def entry_images(entry: dict, limit: int = 8) -> List[Dict[str, str]]:
     return out[:limit]
 
 
+def entry_videos(entry: dict, limit: int = 5) -> List[Dict[str, Any]]:
+    """Videos RSS : media:content video, enclosures video/*."""
+    base = entry_link(entry) or ""
+    out: List[Dict[str, Any]] = []
+    seen = set()
+
+    def add(url: Optional[str], *, mime: Optional[str] = None, source: str = "rss") -> None:
+        abs_url = _abs_url(base, url)
+        if not abs_url or abs_url in seen:
+            return
+        seen.add(abs_url)
+        out.append(
+            {
+                "url": abs_url,
+                "media_type": "video",
+                "mime_type": mime,
+                "source": source,
+            }
+        )
+
+    for media in entry.get("media_content") or []:
+        if not isinstance(media, dict):
+            continue
+        medium = (media.get("medium") or "").lower()
+        mtype = (media.get("type") or "").lower()
+        if medium == "video" or mtype.startswith("video/"):
+            add(media.get("url"), mime=media.get("type"), source="rss-media")
+
+    for enc in entry.get("enclosures") or []:
+        if not isinstance(enc, dict):
+            continue
+        et = (enc.get("type") or "").lower()
+        if et.startswith("video/"):
+            add(enc.get("href") or enc.get("url"), mime=enc.get("type"), source="rss-enclosure")
+
+    return out[:limit]
+
+
+def entry_audios(entry: dict, limit: int = 5) -> List[Dict[str, Any]]:
+    """Audio RSS : media:content audio, enclosures audio/*."""
+    base = entry_link(entry) or ""
+    out: List[Dict[str, Any]] = []
+    seen = set()
+
+    def add(url: Optional[str], *, mime: Optional[str] = None, source: str = "rss") -> None:
+        abs_url = _abs_url(base, url)
+        if not abs_url or abs_url in seen:
+            return
+        seen.add(abs_url)
+        out.append(
+            {
+                "url": abs_url,
+                "media_type": "audio",
+                "mime_type": mime,
+                "source": source,
+            }
+        )
+
+    for media in entry.get("media_content") or []:
+        if not isinstance(media, dict):
+            continue
+        medium = (media.get("medium") or "").lower()
+        mtype = (media.get("type") or "").lower()
+        if medium == "audio" or mtype.startswith("audio/"):
+            add(media.get("url"), mime=media.get("type"), source="rss-media")
+
+    for enc in entry.get("enclosures") or []:
+        if not isinstance(enc, dict):
+            continue
+        et = (enc.get("type") or "").lower()
+        if et.startswith("audio/"):
+            add(enc.get("href") or enc.get("url"), mime=enc.get("type"), source="rss-enclosure")
+
+    return out[:limit]
+
+
 def entry_article_meta(entry: dict) -> Dict[str, Any]:
     meta: Dict[str, Any] = {"sources": ["rss"]}
     keywords = entry_keywords(entry)

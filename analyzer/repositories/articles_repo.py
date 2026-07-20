@@ -7,8 +7,10 @@ from typing import Any, Dict, List, Optional
 
 from models.entities import (
     ArticleAnalysisRecord,
-    ArticleImageRecord,
+    ArticleEntityRecord,
+    ArticleFaceRecord,
     ArticleKeywordRecord,
+    ArticleMediaRecord,
     ArticleMetaNormRecord,
     ArticleRecord,
 )
@@ -79,7 +81,15 @@ async def _load_relations(
 ) -> Dict[int, Dict[str, Any]]:
     """Charge images/keywords/analyses/meta pour un lot d'ids."""
     empty = {
-        aid: {"images": [], "keywords": [], "analyses": [], "meta_norm": None}
+        aid: {
+            "media": [],
+            "images": [],
+            "keywords": [],
+            "entities": [],
+            "faces": [],
+            "analyses": [],
+            "meta_norm": None,
+        }
         for aid in article_ids
     }
     if not article_ids:
@@ -89,8 +99,9 @@ async def _load_relations(
 
     img_rows = await conn.fetch(
         f"""
-        SELECT id, article_id, url, alt, source, is_primary, sort_order
-        FROM article_images
+        SELECT id, article_id, media_type, url, mime_type, title, alt, source,
+               thumbnail_url, duration_ms, width, height, is_primary, sort_order, extra
+        FROM article_media
         WHERE article_id IN ({placeholders})
         ORDER BY sort_order ASC, id ASC
         """,
@@ -98,17 +109,30 @@ async def _load_relations(
     )
     for row in img_rows:
         aid = int(row["article_id"])
-        empty[aid]["images"].append(
-            ArticleImageRecord(
+        extra = _parse_json(row.get("extra"), {})
+        if not isinstance(extra, dict):
+            extra = {}
+        empty[aid]["media"].append(
+            ArticleMediaRecord(
                 id=int(row["id"]),
                 article_id=aid,
+                media_type=row.get("media_type") or "image",
                 url=row["url"],
-                alt=row["alt"],
-                source=row["source"],
+                mime_type=row.get("mime_type"),
+                title=row.get("title"),
+                alt=row.get("alt"),
+                source=row.get("source"),
+                thumbnail_url=row.get("thumbnail_url"),
+                duration_ms=row.get("duration_ms"),
+                width=row.get("width"),
+                height=row.get("height"),
                 is_primary=bool(row["is_primary"]),
                 sort_order=int(row["sort_order"] or 0),
+                extra=extra,
             )
         )
+        if (row.get("media_type") or "image") == "image":
+            empty[aid]["images"].append(empty[aid]["media"][-1])
 
     kw_rows = await conn.fetch(
         f"""
@@ -129,6 +153,66 @@ async def _load_relations(
                 source=row["source"] or "unknown",
             )
         )
+
+    try:
+        ent_rows = await conn.fetch(
+            f"""
+            SELECT id, article_id, text, label, start_char, end_char, source, person_id
+            FROM article_entities
+            WHERE article_id IN ({placeholders})
+            ORDER BY id ASC
+            """,
+            *article_ids,
+        )
+        for row in ent_rows:
+            aid = int(row["article_id"])
+            empty[aid]["entities"].append(
+                ArticleEntityRecord(
+                    id=int(row["id"]),
+                    article_id=aid,
+                    text=row["text"],
+                    label=row["label"],
+                    start_char=row.get("start_char"),
+                    end_char=row.get("end_char"),
+                    source=row.get("source") or "ner_spacy",
+                    person_id=int(row["person_id"]) if row.get("person_id") is not None else None,
+                )
+            )
+    except Exception:
+        pass
+
+    try:
+        face_rows = await conn.fetch(
+            f"""
+            SELECT id, article_id, media_id, person_id, bbox_x, bbox_y, bbox_w, bbox_h,
+                   bbox_unit, confidence, embedding_dim, tool_name, detected_at
+            FROM article_faces
+            WHERE article_id IN ({placeholders})
+            ORDER BY id ASC
+            """,
+            *article_ids,
+        )
+        for row in face_rows:
+            aid = int(row["article_id"])
+            empty[aid]["faces"].append(
+                ArticleFaceRecord(
+                    id=int(row["id"]),
+                    article_id=aid,
+                    media_id=int(row["media_id"]) if row.get("media_id") is not None else None,
+                    person_id=int(row["person_id"]) if row.get("person_id") is not None else None,
+                    bbox_x=row.get("bbox_x"),
+                    bbox_y=row.get("bbox_y"),
+                    bbox_w=row.get("bbox_w"),
+                    bbox_h=row.get("bbox_h"),
+                    bbox_unit=row.get("bbox_unit") or "ratio",
+                    confidence=row.get("confidence"),
+                    embedding_dim=row.get("embedding_dim"),
+                    tool_name=row.get("tool_name") or "face_detect",
+                    detected_at=_as_dt(row.get("detected_at")),
+                )
+            )
+    except Exception:
+        pass
 
     norm_rows = await conn.fetch(
         f"SELECT * FROM article_meta_norm WHERE article_id IN ({placeholders})",

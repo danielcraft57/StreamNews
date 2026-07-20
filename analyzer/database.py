@@ -706,13 +706,15 @@ class Database:
         content_html: Optional[str] = None,
         content_text: Optional[str] = None,
         images: Optional[List[Dict]] = None,
+        videos: Optional[List[Dict]] = None,
+        audios: Optional[List[Dict]] = None,
         article_meta: Optional[Dict] = None,
         enrich_status: str = "ok",
         enrich_error: Optional[str] = None,
         title: Optional[str] = None,
         author: Optional[str] = None,
     ) -> None:
-        """Persiste l'enrichissement ; images/meta -> tables normalisees."""
+        """Persiste l'enrichissement ; media/meta -> tables normalisees."""
         async with self.pool.acquire() as conn:
             await conn.execute(
                 """
@@ -736,15 +738,21 @@ class Database:
             )
             from repositories.normalized_sync import sync_article_after_enrichment
 
-            if images is not None or article_meta is not None:
+            if (
+                images is not None
+                or videos is not None
+                or audios is not None
+                or article_meta is not None
+            ):
                 await sync_article_after_enrichment(
                     conn,
                     is_sqlite=self.is_sqlite,
                     article_id=article_id,
                     images=images if isinstance(images, list) else [],
                     meta=article_meta if isinstance(article_meta, dict) else {},
+                    videos=videos,
+                    audios=audios,
                 )
-
     async def upsert_article(
         self,
         site_id: int,
@@ -756,6 +764,8 @@ class Database:
         published_at=None,
         guid: str = None,
         images: Optional[List[Dict]] = None,
+        videos: Optional[List[Dict]] = None,
+        audios: Optional[List[Dict]] = None,
         article_meta: Optional[Dict] = None,
     ) -> bool:
         """Insert/update un article. Dedup sur dedupe_key (guid ou lien normalise)."""
@@ -862,6 +872,8 @@ class Database:
                 feed_url=feed_n,
                 images=images_final,
                 meta=meta_final,
+                videos=videos,
+                audios=audios,
             )
             return True
 
@@ -963,6 +975,8 @@ class Database:
                     published_at=art.published_at,
                     guid=art.guid,
                     images=art.images or None,
+                    videos=getattr(art, "videos", None) or None,
+                    audios=getattr(art, "audios", None) or None,
                     article_meta=art.article_meta or None,
                 )
                 if ok:
