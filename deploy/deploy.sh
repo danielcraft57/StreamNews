@@ -34,12 +34,14 @@ if [[ "$ROLE" == "all" ]] && ! systemctl list-unit-files 2>/dev/null | grep -q '
   ROLE=data
 fi
 
-# Commandes fichier (repo owned by streamnews)
+# Commandes fichier (repo owned by streamnews).
+# Toujours re-source .env dans le sous-shell : bash -lc / sudo -u droppent l'env.
 as_app() {
+  local inner="cd \"$ROOT\" && set -a && source .env && set +a && $*"
   if [[ "$ME" == "$APP_USER" ]]; then
-    bash -lc "cd \"$ROOT\" && $*"
+    bash -lc "$inner"
   else
-    sudo -u "$APP_USER" bash -lc "cd \"$ROOT\" && $*"
+    sudo -u "$APP_USER" bash -lc "$inner"
   fi
 }
 
