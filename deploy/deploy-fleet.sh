@@ -33,7 +33,14 @@ for host in $FLEET_HOSTS; do
     ssh -o BatchMode=yes -o ConnectTimeout=15 \
       -o StrictHostKeyChecking=accept-new \
       "${FLEET_USER}@${host}" \
-      "sudo -u streamnews bash -lc 'cd \"${DEPLOY_PATH}\" && bash deploy/deploy.sh'"
+      "set -euo pipefail
+       cd \"${DEPLOY_PATH}\"
+       # Pull avant exec (sinon on lance encore l'ancien deploy.sh)
+       BRANCH=\"\${DEPLOY_BRANCH:-main}\"
+       sudo -u streamnews git -c safe.directory=${DEPLOY_PATH} fetch --all --prune
+       sudo -u streamnews git -c safe.directory=${DEPLOY_PATH} reset --hard \"origin/\${BRANCH}\"
+       export DEPLOY_BRANCH=\"\${BRANCH}\"
+       bash deploy/deploy.sh"
     ec=$?
     if [[ "$ec" -ne 0 ]]; then
       echo "ERREUR: deploy failed on $host (exit $ec)"

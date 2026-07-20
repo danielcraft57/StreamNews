@@ -59,9 +59,23 @@ chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
 if [[ ! -f "$APP_DIR/.env" ]]; then
   cp "$APP_DIR/.env.example" "$APP_DIR/.env"
-  # Sur le noeud data, URLs locales
+  # Sur le noeud data, URLs locales + role
   sed -i 's|NODE_ENV=development|NODE_ENV=production|' "$APP_DIR/.env"
+  if grep -q '^STREAMNEWS_ROLE=' "$APP_DIR/.env"; then
+    sed -i 's|^STREAMNEWS_ROLE=.*|STREAMNEWS_ROLE=data|' "$APP_DIR/.env"
+  else
+    echo 'STREAMNEWS_ROLE=data' >> "$APP_DIR/.env"
+  fi
   chown "$APP_USER:$APP_USER" "$APP_DIR/.env"
+else
+  # Corrige un ancien .env copie depuis .env.example (ROLE=all)
+  if grep -qE '^STREAMNEWS_ROLE=(all)?$' "$APP_DIR/.env" || ! grep -q '^STREAMNEWS_ROLE=' "$APP_DIR/.env"; then
+    if grep -q '^STREAMNEWS_ROLE=' "$APP_DIR/.env"; then
+      sed -i 's|^STREAMNEWS_ROLE=.*|STREAMNEWS_ROLE=data|' "$APP_DIR/.env"
+    else
+      echo 'STREAMNEWS_ROLE=data' >> "$APP_DIR/.env"
+    fi
+  fi
 fi
 
 # Init schema depuis ce noeud (localhost)
