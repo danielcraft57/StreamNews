@@ -42,7 +42,8 @@ echo $! >> "$PIDS_FILE"
 echo "==> Celery worker"
 (
   cd analyzer
-  python -m celery -A celery_worker worker --loglevel=info --concurrency=1
+  python -m celery -A celery_worker worker --loglevel=info --concurrency=1 \
+    -Q crawl,ingest,default
 ) > "$LOG_DIR/celery.log" 2>&1 &
 echo $! >> "$PIDS_FILE"
 

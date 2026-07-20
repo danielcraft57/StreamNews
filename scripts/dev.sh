@@ -45,7 +45,8 @@ trap cleanup EXIT INT TERM
 
 (
   cd analyzer
-  python -m celery -A celery_worker worker --loglevel=info --concurrency=2
+  python -m celery -A celery_worker worker --loglevel=info --concurrency=2 \
+    -Q crawl,ingest,default
 ) &
 
 (
