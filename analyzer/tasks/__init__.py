@@ -40,6 +40,34 @@ def _send_ws(message: dict) -> None:
         logger.warning("WS push failed: %s", exc)
 
 
+def _media_captions_for_ner(article: dict) -> Optional[List[dict]]:
+    """Alt/title des medias pour enrichir le NER (lien texte <-> image)."""
+    media = article.get("media") or []
+    if not media:
+        # Fallback listes typees si `media` absent
+        media = []
+        for key in ("images", "videos", "audios"):
+            chunk = article.get(key) or []
+            if isinstance(chunk, list):
+                media.extend(chunk)
+    captions: List[dict] = []
+    for m in media:
+        if not isinstance(m, dict):
+            continue
+        title = (m.get("title") or "").strip()
+        alt = (m.get("alt") or "").strip()
+        if not title and not alt:
+            continue
+        captions.append(
+            {
+                "media_id": m.get("id") if isinstance(m.get("id"), int) else None,
+                "title": title or None,
+                "alt": alt or None,
+            }
+        )
+    return captions or None
+
+
 def _run(coro):
     """Execute une coroutine Celery puis ferme proprement la event loop."""
     loop = asyncio.new_event_loop()
@@ -543,12 +571,14 @@ def analyze_article_task(
                 if isinstance(lang_block, dict) and lang_block.get("lang"):
                     lang_hint = lang_block["lang"]
 
+                media_captions = _media_captions_for_ner(article)
                 payload = analyze_article_content(
                     article.get("content_text"),
                     article.get("content_html"),
                     only=tools,
                     lang_hint=lang_hint,
                     existing_analysis=existing_analysis,
+                    media_captions=media_captions,
                 )
                 await db.update_article_analysis(
                     article_id,

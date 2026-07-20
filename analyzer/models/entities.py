@@ -56,6 +56,7 @@ class ArticleEntityRecord(BaseModel):
     end_char: Optional[int] = None
     source: str = "ner_spacy"
     person_id: Optional[int] = None
+    media_id: Optional[int] = None
 
 
 class PersonRecord(BaseModel):
@@ -216,8 +217,11 @@ class ArticleRecord(BaseModel):
                 {
                     "text": e.text,
                     "label": e.label,
+                    "start_char": e.start_char,
+                    "end_char": e.end_char,
                     "source": e.source,
                     "person_id": e.person_id,
+                    "media_id": e.media_id,
                 }
                 for e in self.entities
             ],

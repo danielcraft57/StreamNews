@@ -336,6 +336,120 @@ async def sync_article_images(
     )
 
 
+def _normalize_label(label: str) -> str:
+    try:
+        from text_analysis.ner_spacy import normalize_entity_label
+
+        return normalize_entity_label(label)[:100]
+    except Exception:
+        return (label or "MISC").strip().upper()[:100] or "MISC"
+
+
+async def ensure_person(conn, *, is_sqlite: bool, display_name: str) -> Optional[int]:
+    """Trouve ou cree une personne par nom affiche (insensible a la casse)."""
+    name = (display_name or "").strip()
+    if not name or len(name) > 500:
+        return None
+    row = await conn.fetchrow(
+        """
+        SELECT id FROM persons
+        WHERE lower(display_name) = lower($1)
+        LIMIT 1
+        """,
+        name,
+    )
+    if row:
+        return int(row["id"])
+    if is_sqlite:
+        await conn.execute(
+            "INSERT INTO persons (display_name, meta) VALUES ($1, '{}')",
+            name[:500],
+        )
+        row = await conn.fetchrow(
+            """
+            SELECT id FROM persons
+            WHERE lower(display_name) = lower($1)
+            ORDER BY id DESC LIMIT 1
+            """,
+            name,
+        )
+    else:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO persons (display_name, meta)
+            VALUES ($1, '{}'::jsonb)
+            RETURNING id
+            """,
+            name[:500],
+        )
+    return int(row["id"]) if row else None
+
+
+async def link_persons_from_entities(
+    conn,
+    *,
+    is_sqlite: bool,
+    article_id: int,
+) -> int:
+    """Lie les entites PERSON a persons, puis les faces du meme media si univoque."""
+    rows = await conn.fetch(
+        """
+        SELECT id, text, label, media_id, person_id
+        FROM article_entities
+        WHERE article_id = $1
+          AND upper(label) IN ('PERSON', 'PER')
+          AND person_id IS NULL
+        """,
+        article_id,
+    )
+    linked = 0
+    for row in rows:
+        person_id = await ensure_person(
+            conn, is_sqlite=is_sqlite, display_name=row["text"]
+        )
+        if not person_id:
+            continue
+        await conn.execute(
+            "UPDATE article_entities SET person_id = $1 WHERE id = $2",
+            person_id,
+            int(row["id"]),
+        )
+        linked += 1
+
+    # Faces sans person : si exactement une PERSON sur le meme media_id, on rattache
+    face_rows = await conn.fetch(
+        """
+        SELECT id, media_id FROM article_faces
+        WHERE article_id = $1 AND person_id IS NULL AND media_id IS NOT NULL
+        """,
+        article_id,
+    )
+    for face in face_rows:
+        mid = face.get("media_id")
+        if mid is None:
+            continue
+        persons = await conn.fetch(
+            """
+            SELECT DISTINCT person_id FROM article_entities
+            WHERE article_id = $1
+              AND media_id = $2
+              AND person_id IS NOT NULL
+              AND upper(label) IN ('PERSON', 'PER')
+            """,
+            article_id,
+            mid,
+        )
+        if len(persons) != 1:
+            continue
+        await conn.execute(
+            "UPDATE article_faces SET person_id = $1 WHERE id = $2",
+            int(persons[0]["person_id"]),
+            int(face["id"]),
+        )
+        linked += 1
+    return linked
+
+
 async def sync_article_entities(
     conn,
     *,
@@ -343,19 +457,25 @@ async def sync_article_entities(
     article_id: int,
     entities: Any,
     source: str = "ner_spacy",
+    link_persons: bool = True,
 ) -> None:
     if not isinstance(entities, list):
         return
-    source = (source or "ner_spacy")[:50]
+    default_source = (source or "ner_spacy")[:50]
     for ent in entities:
+        media_id = None
         if isinstance(ent, str):
-            text, label = ent.strip(), "UNKNOWN"
+            text, label = ent.strip(), "MISC"
             start_char = end_char = None
+            ent_source = default_source
         elif isinstance(ent, dict):
             text = str(ent.get("text") or ent.get("name") or "").strip()
-            label = str(ent.get("label") or ent.get("type") or "UNKNOWN")[:100]
+            label = _normalize_label(str(ent.get("label") or ent.get("type") or "MISC"))
             start_char = ent.get("start_char") if isinstance(ent.get("start_char"), int) else None
             end_char = ent.get("end_char") if isinstance(ent.get("end_char"), int) else None
+            ent_source = str(ent.get("source") or default_source)[:50]
+            raw_mid = ent.get("media_id")
+            media_id = int(raw_mid) if isinstance(raw_mid, int) else None
         else:
             continue
         if not text or len(text) > 500:
@@ -364,31 +484,40 @@ async def sync_article_entities(
             await conn.execute(
                 """
                 INSERT OR IGNORE INTO article_entities
-                    (article_id, text, label, start_char, end_char, source)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                    (article_id, text, label, start_char, end_char, source, media_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 """,
                 article_id,
                 text[:500],
                 label,
                 start_char,
                 end_char,
-                source,
+                ent_source,
+                media_id,
             )
         else:
             await conn.execute(
                 """
                 INSERT INTO article_entities
-                    (article_id, text, label, start_char, end_char, source)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (article_id, text, label, source) DO NOTHING
+                    (article_id, text, label, start_char, end_char, source, media_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (article_id, text, label, source) DO UPDATE SET
+                    start_char = COALESCE(EXCLUDED.start_char, article_entities.start_char),
+                    end_char = COALESCE(EXCLUDED.end_char, article_entities.end_char),
+                    media_id = COALESCE(EXCLUDED.media_id, article_entities.media_id)
                 """,
                 article_id,
                 text[:500],
                 label,
                 start_char,
                 end_char,
-                source,
+                ent_source,
+                media_id,
             )
+    if link_persons:
+        await link_persons_from_entities(
+            conn, is_sqlite=is_sqlite, article_id=article_id
+        )
 
 
 async def sync_article_faces(

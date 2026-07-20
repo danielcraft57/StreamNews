@@ -80,7 +80,10 @@ async def test_sync_media_multi_types_and_entities(temp_db_url):
     )
 
     full = await db.get_article(article_id)
-    assert any(e["text"] == "Macron" for e in full.get("entities") or [])
+    macron = next(e for e in (full.get("entities") or []) if e["text"] == "Macron")
+    assert macron["label"] == "PERSON"
+    assert macron.get("person_id") is not None
+    assert any(e["text"] == "Paris" for e in full.get("entities") or [])
 
     async with db.pool.acquire() as conn:
         await sync_article_media(

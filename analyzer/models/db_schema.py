@@ -156,6 +156,7 @@ persons = Table(
     Column("display_name", String(500)),
     Column("created_at", DateTime, server_default=func.now()),
     Column("meta", JsonDocument, nullable=False, server_default="{}"),
+    Index("idx_persons_display_name", "display_name"),
 )
 
 article_entities = Table(
@@ -178,6 +179,11 @@ article_entities = Table(
         Integer,
         ForeignKey("persons.id", ondelete="SET NULL"),
     ),
+    Column(
+        "media_id",
+        Integer,
+        ForeignKey("article_media.id", ondelete="SET NULL"),
+    ),
     UniqueConstraint(
         "article_id",
         "text",
@@ -187,6 +193,7 @@ article_entities = Table(
     ),
     Index("idx_article_entities_article", "article_id"),
     Index("idx_article_entities_person", "person_id"),
+    Index("idx_article_entities_media", "media_id"),
 )
 
 article_faces = Table(

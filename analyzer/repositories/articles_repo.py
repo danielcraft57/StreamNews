@@ -157,7 +157,7 @@ async def _load_relations(
     try:
         ent_rows = await conn.fetch(
             f"""
-            SELECT id, article_id, text, label, start_char, end_char, source, person_id
+            SELECT id, article_id, text, label, start_char, end_char, source, person_id, media_id
             FROM article_entities
             WHERE article_id IN ({placeholders})
             ORDER BY id ASC
@@ -176,6 +176,7 @@ async def _load_relations(
                     end_char=row.get("end_char"),
                     source=row.get("source") or "ner_spacy",
                     person_id=int(row["person_id"]) if row.get("person_id") is not None else None,
+                    media_id=int(row["media_id"]) if row.get("media_id") is not None else None,
                 )
             )
     except Exception:

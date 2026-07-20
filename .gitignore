@@ -71,6 +71,7 @@ coverage/
 .nyc_output
 htmlcov/
 .pytest_cache/
+analyzer/.pytest_tmp/
 .mypy_cache/
 .ruff_cache/
 .tox/

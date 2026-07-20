@@ -31,10 +31,12 @@ def analyze_article_content(
     only: Optional[Iterable[str]] = None,
     lang_hint: Optional[str] = None,
     existing_analysis: Optional[Dict[str, Any]] = None,
+    media_captions: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Prepare le texte et execute les analyseurs demandes."""
     text = prepare_text_for_analysis(content_text, content_html)
-    if len(text.strip()) < 40:
+    captions = media_captions if media_captions else None
+    if len(text.strip()) < 40 and not captions:
         return {
             "analysis_status": "skipped",
             "analysis_error": "contenu insuffisant",
@@ -42,11 +44,18 @@ def analyze_article_content(
             "analyzed_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    if only and len(list(only)) == 1:
-        tool = next(iter(only))
-        results = {tool: run_single_analyzer(tool, text, lang_hint=lang_hint)}
+    only_list = list(only) if only else None
+    if only_list and len(only_list) == 1:
+        tool = only_list[0]
+        results = {
+            tool: run_single_analyzer(
+                tool, text, lang_hint=lang_hint, media_captions=captions
+            )
+        }
     else:
-        results = run_analyzers(text, only=only, lang_hint=lang_hint)
+        results = run_analyzers(
+            text, only=only_list, lang_hint=lang_hint, media_captions=captions
+        )
 
     merged = merge_analysis_results(existing_analysis, results)
     statuses = [b.get("status") for b in results.values() if isinstance(b, dict)]

@@ -43,6 +43,7 @@ def run_analyzers(
     *,
     only: Optional[Iterable[str]] = None,
     lang_hint: Optional[str] = None,
+    media_captions: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Execute chaque analyseur independamment."""
     selected = _select_analyzers(only)
@@ -58,7 +59,12 @@ def run_analyzers(
             continue
 
         hint = detected_lang if analyzer.name in ("keywords_yake", "ner_spacy") else lang_hint
-        results[analyzer.name] = _safe_analyze(analyzer, text, lang_hint=hint)
+        results[analyzer.name] = _safe_analyze(
+            analyzer,
+            text,
+            lang_hint=hint,
+            media_captions=media_captions if analyzer.name == "ner_spacy" else None,
+        )
 
     return results
 
@@ -68,13 +74,19 @@ def run_single_analyzer(
     text: str,
     *,
     lang_hint: Optional[str] = None,
+    media_captions: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     analyzer = get_analyzer(name)
     if not analyzer:
         return error_result(f"analyseur inconnu: {name}")
     if not analyzer.is_available():
         return {"status": "skipped", "reason": "dependance non installee"}
-    return _safe_analyze(analyzer, text, lang_hint=lang_hint)
+    return _safe_analyze(
+        analyzer,
+        text,
+        lang_hint=lang_hint,
+        media_captions=media_captions if name == "ner_spacy" else None,
+    )
 
 
 def _select_analyzers(only: Optional[Iterable[str]]) -> List[TextAnalyzer]:
@@ -89,10 +101,18 @@ def _safe_analyze(
     text: str,
     *,
     lang_hint: Optional[str] = None,
+    media_captions: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     if not analyzer.is_available():
         return {"status": "skipped", "reason": "dependance non installee"}
     try:
+        if media_captions is not None and analyzer.name == "ner_spacy":
+            return analyzer.analyze(
+                text, lang_hint=lang_hint, media_captions=media_captions
+            )
+        return analyzer.analyze(text, lang_hint=lang_hint)
+    except TypeError:
+        # Analyseur qui n'accepte pas media_captions
         return analyzer.analyze(text, lang_hint=lang_hint)
     except Exception as exc:
         return error_result(str(exc))
