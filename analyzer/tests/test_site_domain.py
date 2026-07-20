@@ -80,37 +80,42 @@ async def test_upsert_site_rejects_invalid_url():
 async def test_update_site_status_merges_feeds():
     db = Database()
     mock_conn = AsyncMock()
-    existing = [{"url": "https://bfmtv.com/rss", "title": "RSS"}]
-    mock_conn.fetchrow = AsyncMock(
-        side_effect=[{"rss_feeds": json.dumps(existing)}, None]
-    )
+    existing_rows = [
+        {
+            "url": "https://bfmtv.com/rss",
+            "title": "RSS",
+            "feed_type": "detected",
+            "source_page_id": None,
+        }
+    ]
+    mock_conn.fetch = AsyncMock(return_value=existing_rows)
+    mock_conn.fetchrow = AsyncMock(return_value={"id": 1})
     mock_conn.execute = AsyncMock()
     db.pool = _mock_pool(mock_conn)
 
     new_feeds = [{"url": "https://bfmtv.com/atom.xml", "title": "Atom"}]
     await db.update_site_status(1, "completed", new_feeds, 10, merge_feeds=True)
 
-    args = mock_conn.execute.await_args.args
-    stored = json.loads(args[2])
-    urls = {f["url"] for f in stored}
-    assert "https://bfmtv.com/rss" in urls
-    assert "https://bfmtv.com/atom.xml" in urls
+    update_sql = mock_conn.execute.await_args_list[0].args[0]
+    assert "UPDATE sites SET status" in update_sql
+    assert "rss_feeds" not in update_sql
+    assert mock_conn.execute.await_count >= 2
 
 
 @pytest.mark.asyncio
 async def test_update_site_status_can_replace_feeds():
     db = Database()
     mock_conn = AsyncMock()
-    mock_conn.fetchrow = AsyncMock(return_value=None)
+    mock_conn.fetchrow = AsyncMock(return_value={"id": 9})
     mock_conn.execute = AsyncMock()
     db.pool = _mock_pool(mock_conn)
 
     feeds = [{"url": "https://example.com/only", "title": "Only"}]
     await db.update_site_status(1, "completed", feeds, 5, merge_feeds=False)
 
-    mock_conn.fetchrow.assert_awaited_once()
-    stored = json.loads(mock_conn.execute.await_args.args[2])
-    assert len(stored) == 1
+    update_sql = mock_conn.execute.await_args_list[0].args[0]
+    assert "UPDATE sites SET status" in update_sql
+    assert mock_conn.execute.await_args_list[0].args[1:] == ("completed", 5, 1)
 
 
 @pytest.mark.asyncio
@@ -118,25 +123,25 @@ async def test_ensure_site_domain_unique_merges_duplicates():
     db = Database()
     mock_conn = AsyncMock()
     mock_conn.fetch = AsyncMock(
-        return_value=[
-            {
-                "id": 1,
-                "url": "https://www.bfmtv.com/",
-                "domain": None,
-                "rss_feeds": json.dumps(
-                    [{"url": "https://bfmtv.com/rss-a", "title": "A"}]
-                ),
-            },
-            {
-                "id": 2,
-                "url": "https://bfmtv.com/actu",
-                "domain": None,
-                "rss_feeds": json.dumps(
-                    [{"url": "https://bfmtv.com/rss-b", "title": "B"}]
-                ),
-            },
+        side_effect=[
+            [
+                {
+                    "id": 1,
+                    "url": "https://www.bfmtv.com/",
+                    "domain": None,
+                },
+                {
+                    "id": 2,
+                    "url": "https://bfmtv.com/actu",
+                    "domain": None,
+                },
+            ],
+            # load_site_rss_feeds for site 1 then site 2
+            [{"url": "https://bfmtv.com/rss-a", "title": "A", "feed_type": "rss", "source_page_id": None}],
+            [{"url": "https://bfmtv.com/rss-b", "title": "B", "feed_type": "rss", "source_page_id": None}],
         ]
     )
+    mock_conn.fetchrow = AsyncMock(return_value={"id": 1})
     mock_conn.execute = AsyncMock()
     db.pool = _mock_pool(mock_conn)
 

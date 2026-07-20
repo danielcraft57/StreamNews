@@ -76,11 +76,12 @@ async def test_add_page_analysis_serializes_feeds():
     feeds = [{"url": "https://example.com/rss", "title": "Feed"}]
     await db.add_page_analysis(1, "https://example.com/page", "Title", feeds)
 
-    args = mock_conn.execute.await_args.args
+    args = mock_conn.execute.await_args_list[0].args
     assert args[1] == 1
     assert args[2] == "https://example.com/page"
     assert args[3] == "Title"
-    assert json.loads(args[4]) == feeds
+    assert "INSERT INTO pages" in args[0]
+    assert "rss_feeds" not in args[0]
 
 
 @pytest.mark.asyncio

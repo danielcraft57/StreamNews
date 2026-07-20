@@ -329,6 +329,59 @@ async def hydrate_articles_batch(
     return articles
 
 
+async def load_page_rss_feeds(conn, page_id: int) -> List[Dict[str, Any]]:
+    rows = await conn.fetch(
+        """
+        SELECT url, title, feed_type
+        FROM rss_feeds
+        WHERE source_page_id = $1
+        ORDER BY id ASC
+        """,
+        page_id,
+    )
+    return [
+        {
+            "url": r["url"],
+            "title": r["title"] or "Flux RSS",
+            "type": r["feed_type"] or "detected",
+        }
+        for r in rows
+    ]
+
+
+async def hydrate_pages_batch(
+    conn, pages: List[Dict[str, Any]], *, is_sqlite: bool
+) -> List[Dict[str, Any]]:
+    if not pages:
+        return pages
+    if not await has_normalized_tables(conn, is_sqlite=is_sqlite):
+        return pages
+    ids = [int(p["id"]) for p in pages]
+    placeholders = ", ".join(f"${i + 1}" for i in range(len(ids)))
+    rows = await conn.fetch(
+        f"""
+        SELECT source_page_id, url, title, feed_type
+        FROM rss_feeds
+        WHERE source_page_id IN ({placeholders})
+        ORDER BY id ASC
+        """,
+        *ids,
+    )
+    by_page: Dict[int, List[Dict[str, Any]]] = {}
+    for row in rows:
+        pid = int(row["source_page_id"])
+        by_page.setdefault(pid, []).append(
+            {
+                "url": row["url"],
+                "title": row["title"] or "Flux RSS",
+                "type": row["feed_type"] or "detected",
+            }
+        )
+    for page in pages:
+        page["rss_feeds"] = by_page.get(int(page["id"]), [])
+    return pages
+
+
 async def hydrate_site(conn, site: Dict[str, Any], *, is_sqlite: bool) -> Dict[str, Any]:
     if not await has_normalized_tables(conn, is_sqlite=is_sqlite):
         return site

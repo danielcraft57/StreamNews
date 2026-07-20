@@ -1,4 +1,4 @@
-"""Tests lectures depuis tables normalisees (Phase 3)."""
+"""Tests lectures depuis tables normalisees (Phase 3/4)."""
 from __future__ import annotations
 
 import pytest
@@ -24,7 +24,7 @@ async def test_get_article_prefers_normalized_tables(temp_db_url):
 
     async with db.pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO sites (url, status, domain, rss_feeds) VALUES ($1, 'ok', 'ex.com', '[]')",
+            "INSERT INTO sites (url, status, domain) VALUES ($1, 'ok', 'ex.com')",
             "https://ex.com",
         )
         site = await conn.fetchrow("SELECT id FROM sites LIMIT 1")
@@ -37,8 +37,11 @@ async def test_get_article_prefers_normalized_tables(temp_db_url):
         images=[{"url": "https://ex.com/img.jpg", "source": "rss"}],
         article_meta={"domain": "ex.com", "keywords": ["ia"]},
     )
+    articles = await db.get_site_articles(int(site["id"]))
+    article_id = articles[0]["id"]
+
     await db.update_article_enrichment(
-        (await db.get_site_articles(int(site["id"])))[0]["id"],
+        article_id,
         content_html="<p>x</p>",
         content_text="x " * 50,
         images=[{"url": "https://ex.com/img.jpg", "source": "og"}],
@@ -50,21 +53,12 @@ async def test_get_article_prefers_normalized_tables(temp_db_url):
         },
         enrich_status="ok",
     )
-    articles = await db.get_site_articles(int(site["id"]))
-    article_id = articles[0]["id"]
 
     await db.update_article_analysis(
         article_id,
         analysis={"yake": {"status": "ok", "keywords": ["ia"]}},
         analysis_status="ok",
     )
-
-    # Corrompre le JSON legacy : la lecture doit ignorer et reconstruire
-    async with db.pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE articles SET images = '[]', article_meta = '{}' WHERE id = $1",
-            article_id,
-        )
 
     full = await db.get_article(article_id)
     assert full["images"][0]["url"] == "https://ex.com/img.jpg"
@@ -111,4 +105,22 @@ async def test_list_needing_analysis_uses_column(temp_db_url):
     assert "https://z.com/a" in links
     assert "https://z.com/b" not in links
 
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_migration_005_drops_legacy_json(temp_db_url):
+    run_migrations(temp_db_url, reset=True)
+    db = Database()
+    db.pool = await create_pool(temp_db_url)
+    async with db.pool.acquire() as conn:
+        for table, banned in (
+            ("sites", "rss_feeds"),
+            ("pages", "rss_feeds"),
+            ("articles", "images"),
+            ("articles", "article_meta"),
+        ):
+            cols = await conn.fetch(f"PRAGMA table_info({table})")
+            names = {r["name"] for r in cols}
+            assert banned not in names, f"{table}.{banned} should be dropped"
     await db.close()

@@ -53,17 +53,13 @@ class Database:
 
     def _row_to_dict(self, row) -> Dict:
         data = dict(row)
-        if 'rss_feeds' in data:
-            data['rss_feeds'] = self._parse_json_field(data['rss_feeds'])
         if 'meta_extra' in data:
             raw = self._parse_json_field(data['meta_extra'])
             data['meta_extra'] = raw if isinstance(raw, dict) else {}
-        if 'images' in data:
-            raw = self._parse_json_field(data['images'])
-            data['images'] = raw if isinstance(raw, list) else []
-        if 'article_meta' in data:
-            raw = self._parse_json_field(data['article_meta'])
-            data['article_meta'] = raw if isinstance(raw, dict) else {}
+        # API shape : hydrate depuis tables normalisees (pas de blob JSON)
+        data.setdefault('images', [])
+        data.setdefault('article_meta', {})
+        data.setdefault('rss_feeds', [])
         # Dates asyncpg -> iso pour le front
         for key in (
             'created_at', 'updated_at', 'analyzed_at', 'published_at',
@@ -71,7 +67,6 @@ class Database:
         ):
             if key in data and data[key] is not None and hasattr(data[key], 'isoformat'):
                 data[key] = data[key].isoformat()
-        # Statut analyse : colonne d'abord (source de verite)
         if data.get("analysis_status") and isinstance(data.get("article_meta"), dict):
             data["article_meta"].setdefault("analysis_status", data["analysis_status"])
             if data.get("analysis_error"):
@@ -204,7 +199,7 @@ class Database:
                 except Exception:
                     pass
             rows = await conn.fetch(
-                "SELECT id, url, domain, rss_feeds FROM sites ORDER BY id ASC"
+                "SELECT id, url, domain FROM sites ORDER BY id ASC"
             )
             groups = defaultdict(list)
             for row in rows:
@@ -220,24 +215,24 @@ class Database:
                     {
                         "id": row["id"],
                         "domain": domain,
-                        "rss_feeds": self._parse_json_field(row["rss_feeds"]),
                     }
                 )
 
             deleted = 0
+            from repositories.normalized_sync import sync_rss_feeds_list
+            from repositories.normalized_read import load_site_rss_feeds
+
             for key, items in groups.items():
                 if key.startswith("__orphan_"):
                     continue
                 keep = items[0]
                 feeds: List[Dict] = []
                 for item in items:
-                    raw = item.get("rss_feeds") or []
-                    if isinstance(raw, list):
-                        feeds.extend(raw)
+                    raw = await load_site_rss_feeds(conn, int(item["id"]))
+                    feeds.extend(raw)
                 feeds = self.merge_rss_feeds([], feeds)
 
                 for dup in items[1:]:
-                    # Deplace les articles non deja presents sur le site garde
                     await conn.execute(
                         """
                         UPDATE articles AS a
@@ -259,6 +254,18 @@ class Database:
                         dup["id"],
                     )
                     await conn.execute(
+                        """
+                        UPDATE rss_feeds SET site_id = $1
+                        WHERE site_id = $2
+                          AND NOT EXISTS (
+                            SELECT 1 FROM rss_feeds r2
+                            WHERE r2.site_id = $1 AND r2.url = rss_feeds.url
+                          )
+                        """,
+                        keep["id"],
+                        dup["id"],
+                    )
+                    await conn.execute(
                         "DELETE FROM sites WHERE id = $1", dup["id"]
                     )
                     deleted += 1
@@ -267,13 +274,17 @@ class Database:
                     """
                     UPDATE sites
                     SET domain = $1,
-                        rss_feeds = $2,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE id = $3
+                    WHERE id = $2
                     """,
                     keep["domain"] or key,
-                    json.dumps(feeds),
                     keep["id"],
+                )
+                await sync_rss_feeds_list(
+                    conn,
+                    is_sqlite=self.is_sqlite,
+                    site_id=int(keep["id"]),
+                    feeds=feeds,
                 )
 
             if self.is_sqlite:
@@ -396,28 +407,22 @@ class Database:
             if rss_feeds is not None:
                 feeds = rss_feeds
                 if merge_feeds:
-                    row = await conn.fetchrow(
-                        "SELECT rss_feeds FROM sites WHERE id = $1", site_id
-                    )
-                    existing = (
-                        self._parse_json_field(row["rss_feeds"]) if row else []
-                    )
-                    if not isinstance(existing, list):
-                        existing = []
+                    from repositories.normalized_read import load_site_rss_feeds
+
+                    existing = await load_site_rss_feeds(conn, site_id)
                     feeds = self.merge_rss_feeds(existing, rss_feeds)
                 await conn.execute(
-                    "UPDATE sites SET status = $1, rss_feeds = $2, total_pages_analyzed = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4",
-                    status, json.dumps(feeds), total_pages, site_id
+                    "UPDATE sites SET status = $1, total_pages_analyzed = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3",
+                    status, total_pages, site_id
                 )
-                from repositories.normalized_sync import has_normalized_tables, sync_rss_feeds_list
+                from repositories.normalized_sync import sync_rss_feeds_list
 
-                if await has_normalized_tables(conn, is_sqlite=self.is_sqlite):
-                    await sync_rss_feeds_list(
-                        conn,
-                        is_sqlite=self.is_sqlite,
-                        site_id=site_id,
-                        feeds=feeds,
-                    )
+                await sync_rss_feeds_list(
+                    conn,
+                    is_sqlite=self.is_sqlite,
+                    site_id=site_id,
+                    feeds=feeds,
+                )
             else:
                 await conn.execute(
                     "UPDATE sites SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
@@ -481,28 +486,27 @@ class Database:
                 )
 
     async def add_page_analysis(self, site_id: int, url: str, title: str = None, rss_feeds: List[Dict] = None):
-        """Ajoute l'analyse d'une page"""
+        """Ajoute l'analyse d'une page ; feeds -> table rss_feeds."""
         async with self.pool.acquire() as conn:
             await conn.execute(
-                "INSERT INTO pages (site_id, url, title, rss_feeds) VALUES ($1, $2, $3, $4)",
-                site_id, url, title, json.dumps(rss_feeds or [])
+                "INSERT INTO pages (site_id, url, title) VALUES ($1, $2, $3)",
+                site_id, url, title
             )
-            from repositories.normalized_sync import has_normalized_tables, sync_rss_feeds_list
+            from repositories.normalized_sync import sync_rss_feeds_list
 
-            if await has_normalized_tables(conn, is_sqlite=self.is_sqlite):
-                page = await conn.fetchrow(
-                    "SELECT id FROM pages WHERE site_id = $1 AND url = $2 ORDER BY id DESC LIMIT 1",
-                    site_id,
-                    url,
-                )
-                page_id = int(page["id"]) if page else None
-                await sync_rss_feeds_list(
-                    conn,
-                    is_sqlite=self.is_sqlite,
-                    site_id=site_id,
-                    feeds=rss_feeds or [],
-                    source_page_id=page_id,
-                )
+            page = await conn.fetchrow(
+                "SELECT id FROM pages WHERE site_id = $1 AND url = $2 ORDER BY id DESC LIMIT 1",
+                site_id,
+                url,
+            )
+            page_id = int(page["id"]) if page else None
+            await sync_rss_feeds_list(
+                conn,
+                is_sqlite=self.is_sqlite,
+                site_id=site_id,
+                feeds=rss_feeds or [],
+                source_page_id=page_id,
+            )
 
     async def get_site(self, site_id: int) -> Optional[Dict]:
         """Récupère les détails d'un site"""
@@ -565,7 +569,10 @@ class Database:
                 "SELECT * FROM pages WHERE site_id = $1 ORDER BY analyzed_at DESC",
                 site_id
             )
-            return [self._row_to_dict(row) for row in rows]
+            pages = [self._row_to_dict(row) for row in rows]
+            from repositories.normalized_read import hydrate_pages_batch
+
+            return await hydrate_pages_batch(conn, pages, is_sqlite=self.is_sqlite)
 
     async def get_site_articles(self, site_id: int, limit: int = 100) -> List[Dict]:
         """Liste articles (sans gros corps HTML - pour le panneau lecteur)."""
@@ -579,7 +586,7 @@ class Database:
                 f"""
                 SELECT id, site_id, feed_id, feed_url, title, link, summary, author,
                        published_at, guid, dedupe_key, fetched_at,
-                       images, article_meta, enriched_at, enrich_status, enrich_error,
+                       enriched_at, enrich_status, enrich_error,
                        analysis_status, analysis_error, analyzed_at
                 FROM articles
                 WHERE site_id = $1
@@ -740,53 +747,38 @@ class Database:
         title: Optional[str] = None,
         author: Optional[str] = None,
     ) -> None:
-        """Persiste le resultat d'enrichissement (ok ou error)."""
+        """Persiste l'enrichissement ; images/meta -> tables normalisees."""
         async with self.pool.acquire() as conn:
             await conn.execute(
                 """
                 UPDATE articles SET
                     content_html = COALESCE($2, content_html),
                     content_text = COALESCE($3, content_text),
-                    images = COALESCE($4, images),
-                    article_meta = COALESCE($5, article_meta),
-                    enrich_status = $6,
-                    enrich_error = $7,
-                    enriched_at = CASE WHEN $6 = 'ok' THEN CURRENT_TIMESTAMP ELSE enriched_at END,
-                    title = COALESCE($8, title),
-                    author = COALESCE($9, author)
+                    enrich_status = $4,
+                    enrich_error = $5,
+                    enriched_at = CASE WHEN $4 = 'ok' THEN CURRENT_TIMESTAMP ELSE enriched_at END,
+                    title = COALESCE($6, title),
+                    author = COALESCE($7, author)
                 WHERE id = $1
                 """,
                 article_id,
                 content_html,
                 content_text,
-                json.dumps(images) if images is not None else None,
-                json.dumps(article_meta) if article_meta is not None else None,
                 enrich_status,
                 enrich_error,
                 ((title or "")[:1000] or None) if title is not None else None,
                 ((author or "")[:500] or None) if author is not None else None,
             )
-            from repositories.normalized_sync import has_normalized_tables, sync_article_after_enrichment
+            from repositories.normalized_sync import sync_article_after_enrichment
 
-            if await has_normalized_tables(conn, is_sqlite=self.is_sqlite):
-                row = await conn.fetchrow(
-                    "SELECT images, article_meta FROM articles WHERE id = $1",
-                    article_id,
+            if images is not None or article_meta is not None:
+                await sync_article_after_enrichment(
+                    conn,
+                    is_sqlite=self.is_sqlite,
+                    article_id=article_id,
+                    images=images if isinstance(images, list) else [],
+                    meta=article_meta if isinstance(article_meta, dict) else {},
                 )
-                if row:
-                    images_final = self._parse_json_field(row["images"])
-                    meta_final = self._parse_json_field(row["article_meta"])
-                    if not isinstance(images_final, list):
-                        images_final = []
-                    if not isinstance(meta_final, dict):
-                        meta_final = {}
-                    await sync_article_after_enrichment(
-                        conn,
-                        is_sqlite=self.is_sqlite,
-                        article_id=article_id,
-                        images=images_final,
-                        meta=meta_final,
-                    )
 
     async def upsert_article(
         self,
@@ -803,6 +795,8 @@ class Database:
     ) -> bool:
         """Insert/update un article. Dedup sur dedupe_key (guid ou lien normalise)."""
         from utils import article_dedupe_key, normalize_identifier, normalize_url
+        from repositories.normalized_read import load_article_images, load_article_meta_norm
+        from repositories.normalized_sync import sync_article_after_upsert
 
         link_n = normalize_url(link)
         if not link_n:
@@ -814,7 +808,7 @@ class Database:
         async with self.pool.acquire() as conn:
             existing = await conn.fetchrow(
                 """
-                SELECT images, article_meta, enrich_status
+                SELECT id, enrich_status
                 FROM articles
                 WHERE site_id = $1 AND dedupe_key = $2
                 """,
@@ -822,43 +816,11 @@ class Database:
                 key[:2100],
             )
 
-            images_json = None
-            meta_json = None
-            if images is not None or article_meta is not None:
-                if existing and existing.get("enrich_status") == "ok":
-                    if images is not None:
-                        images_json = json.dumps(self._parse_json_field(existing["images"]))
-                    if article_meta is not None:
-                        meta_json = json.dumps(
-                            self._merge_article_meta_dict(
-                                self._parse_json_field(existing["article_meta"]), article_meta
-                            )
-                        )
-                elif existing:
-                    if images is not None:
-                        images_json = json.dumps(
-                            self._merge_image_lists(
-                                self._parse_json_field(existing["images"]), images
-                            )
-                        )
-                    if article_meta is not None:
-                        meta_json = json.dumps(
-                            self._merge_article_meta_dict(
-                                self._parse_json_field(existing["article_meta"]), article_meta
-                            )
-                        )
-                else:
-                    if images is not None:
-                        images_json = json.dumps(images)
-                    if article_meta is not None:
-                        meta_json = json.dumps(article_meta)
-
             await conn.execute(
                 """
                 INSERT INTO articles
-                    (site_id, feed_url, title, link, summary, author, published_at, guid, dedupe_key,
-                     images, article_meta)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, '[]'), COALESCE($11, '{}'))
+                    (site_id, feed_url, title, link, summary, author, published_at, guid, dedupe_key)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 ON CONFLICT (site_id, dedupe_key) DO UPDATE SET
                     feed_url = EXCLUDED.feed_url,
                     title = EXCLUDED.title,
@@ -867,8 +829,6 @@ class Database:
                     author = EXCLUDED.author,
                     published_at = COALESCE(EXCLUDED.published_at, articles.published_at),
                     guid = COALESCE(EXCLUDED.guid, articles.guid),
-                    images = CASE WHEN $10 IS NOT NULL THEN $10 ELSE articles.images END,
-                    article_meta = CASE WHEN $11 IS NOT NULL THEN $11 ELSE articles.article_meta END,
                     fetched_at = CURRENT_TIMESTAMP
                 """,
                 site_id,
@@ -880,36 +840,64 @@ class Database:
                 published_at,
                 (guid_n or "")[:2000] or None,
                 key[:2100],
-                images_json,
-                meta_json,
             )
-            from repositories.normalized_sync import has_normalized_tables, sync_article_after_upsert
 
-            if await has_normalized_tables(conn, is_sqlite=self.is_sqlite):
-                art = await conn.fetchrow(
-                    """
-                    SELECT id, images, article_meta FROM articles
-                    WHERE site_id = $1 AND dedupe_key = $2
-                    """,
-                    site_id,
-                    key[:2100],
-                )
-                if art:
-                    images_final = self._parse_json_field(art["images"])
-                    meta_final = self._parse_json_field(art["article_meta"])
-                    if not isinstance(images_final, list):
-                        images_final = []
-                    if not isinstance(meta_final, dict):
-                        meta_final = {}
-                    await sync_article_after_upsert(
-                        conn,
-                        is_sqlite=self.is_sqlite,
-                        site_id=site_id,
-                        article_id=int(art["id"]),
-                        feed_url=feed_n,
-                        images=images_final,
-                        meta=meta_final,
+            art = await conn.fetchrow(
+                """
+                SELECT id FROM articles
+                WHERE site_id = $1 AND dedupe_key = $2
+                """,
+                site_id,
+                key[:2100],
+            )
+            if not art:
+                return True
+
+            article_id = int(art["id"])
+            images_final = images if isinstance(images, list) else []
+            meta_final = article_meta if isinstance(article_meta, dict) else {}
+
+            # Si deja enrichi : ne pas ecraser images/meta normalises
+            if existing and existing.get("enrich_status") == "ok":
+                if images is not None:
+                    images_final = await load_article_images(conn, article_id)
+                if article_meta is not None:
+                    norm = await load_article_meta_norm(conn, article_id)
+                    if norm:
+                        meta_final = {
+                            "canonical_url": norm.get("canonical_url"),
+                            "date_published": norm.get("date_published"),
+                            "schema_type": norm.get("schema_type"),
+                            "reading_time_minutes": norm.get("reading_time_minutes"),
+                            "primary_image": norm.get("primary_image_url"),
+                            "domain": norm.get("domain"),
+                        }
+                        extra = self._parse_json_field(norm.get("extra"))
+                        if isinstance(extra, dict):
+                            meta_final.update(extra)
+                    meta_final = self._merge_article_meta_dict(meta_final, article_meta)
+            elif existing and (images is not None or article_meta is not None):
+                if images is not None:
+                    images_final = self._merge_image_lists(
+                        await load_article_images(conn, article_id), images
                     )
+                if article_meta is not None:
+                    # merge keywords/meta depuis tables via hydrate light
+                    from repositories.normalized_read import load_article_keywords
+
+                    kws = await load_article_keywords(conn, article_id)
+                    base_meta = {"keywords": [k["keyword"] for k in kws]} if kws else {}
+                    meta_final = self._merge_article_meta_dict(base_meta, article_meta)
+
+            await sync_article_after_upsert(
+                conn,
+                is_sqlite=self.is_sqlite,
+                site_id=site_id,
+                article_id=article_id,
+                feed_url=feed_n,
+                images=images_final,
+                meta=meta_final,
+            )
             return True
 
     async def ensure_article_dedupe(self) -> int:

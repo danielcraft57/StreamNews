@@ -78,3 +78,16 @@ Detail secrets : README → section CI/CD.
 - Pi 2 : `CELERY_CONCURRENCY=1`
 - Redis ouvert sur le LAN sans auth : OK en lab isole, **jamais** expose Internet
 - Bastion CD ≠ edge nginx (souvent node9 vs node12)
+
+## BDD - lectures (local + prod)
+
+Schema normalise (Alembic) : tables `rss_feeds`, `article_images`, `article_keywords`,
+`article_analyses`, `article_meta_norm`. Peu de JSON (meta residuel seulement).
+
+| Environnement | Outil / pratique |
+|---------------|------------------|
+| **Local SQLite** | WAL + `cache_size` / `mmap_size` (dans `db_backend.py`), `EXPLAIN QUERY PLAN`, `ANALYZE` apres gros imports |
+| **Prod Postgres** | `pg_stat_statements` (`deploy/sql/enable_pg_stat_statements.sql`), `EXPLAIN (ANALYZE, BUFFERS)`, indexes covering (migration 005), optionnel PgBouncer si beaucoup de workers |
+| **Les deux** | Filtrer sur colonnes (`analysis_status`, `enrich_status`), hydrate batch (pas de N+1) |
+
+Apres un gros crawl : `ANALYZE` (SQLite) ou laisser autovacuum (Postgres).

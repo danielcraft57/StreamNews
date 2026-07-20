@@ -1,7 +1,5 @@
-"""Tests dual-write JSON legacy + tables normalisees (Phase 2)."""
+"""Tests dual-write vers tables normalisees (Phase 4 : plus de JSON legacy)."""
 from __future__ import annotations
-
-import json
 
 import pytest
 
@@ -27,8 +25,8 @@ async def test_upsert_article_dual_writes_feed_and_images(temp_db_url):
     async with db.pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO sites (url, status, rss_feeds, domain)
-            VALUES ($1, 'ok', '[]', 'example.com')
+            INSERT INTO sites (url, status, domain)
+            VALUES ($1, 'ok', 'example.com')
             """,
             "https://example.com",
         )
@@ -65,6 +63,12 @@ async def test_upsert_article_dual_writes_feed_and_images(temp_db_url):
         )
         assert kw_count >= 1
 
+        # Plus de colonnes JSON legacy
+        cols = await conn.fetch("PRAGMA table_info(articles)")
+        names = {r["name"] for r in cols}
+        assert "images" not in names
+        assert "article_meta" not in names
+
     await db.close()
 
 
@@ -82,8 +86,8 @@ async def test_update_article_analysis_dual_writes(temp_db_url):
         site = await conn.fetchrow("SELECT id FROM sites LIMIT 1")
         await conn.execute(
             """
-            INSERT INTO articles (site_id, feed_url, title, link, dedupe_key, article_meta)
-            VALUES ($1, $2, $3, $4, $5, '{}')
+            INSERT INTO articles (site_id, feed_url, title, link, dedupe_key)
+            VALUES ($1, $2, $3, $4, $5)
             """,
             site["id"],
             "https://ex.com/feed",
@@ -113,7 +117,6 @@ async def test_update_article_analysis_dual_writes(temp_db_url):
         assert tool["tool_name"] == "langdetect"
         assert tool["status"] == "ok"
 
-    # Lecture hydratee : analysis reconstruit depuis la table
     full = await db.get_article(int(art["id"]))
     assert full["analysis_status"] == "ok"
     assert full["article_meta"]["analysis"]["langdetect"]["language"] == "fr"
@@ -129,7 +132,7 @@ async def test_update_site_status_syncs_rss_feeds(temp_db_url):
 
     async with db.pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO sites (url, status, rss_feeds) VALUES ($1, 'pending', '[]')",
+            "INSERT INTO sites (url, status) VALUES ($1, 'pending')",
             "https://news.test",
         )
         site = await conn.fetchrow("SELECT id FROM sites LIMIT 1")
@@ -144,5 +147,7 @@ async def test_update_site_status_syncs_rss_feeds(temp_db_url):
     async with db.pool.acquire() as conn:
         count = await conn.fetchval("SELECT COUNT(*) FROM rss_feeds WHERE site_id = $1", site["id"])
         assert count == 1
+        cols = await conn.fetch("PRAGMA table_info(sites)")
+        assert "rss_feeds" not in {r["name"] for r in cols}
 
     await db.close()

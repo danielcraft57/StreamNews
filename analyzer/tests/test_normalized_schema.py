@@ -4,11 +4,12 @@ from __future__ import annotations
 import json
 
 import pytest
+from alembic import command
 
 from backfill_normalized import backfill_normalized
 from database import Database
 from db_backend import create_pool
-from migrate import run_migrations
+from migrate import alembic_config, run_migrations
 
 
 @pytest.fixture
@@ -41,8 +42,11 @@ async def test_migration_002_creates_normalized_tables(temp_db_url):
 
 
 @pytest.mark.asyncio
-async def test_backfill_from_legacy_json(temp_db_url):
-    run_migrations(temp_db_url, reset=True)
+async def test_backfill_from_legacy_json_before_drop(temp_db_url):
+    """Backfill sur schema 004 (JSON encore present), puis upgrade 005."""
+    cfg = alembic_config(temp_db_url)
+    command.downgrade(cfg, "base")
+    command.upgrade(cfg, "004")
 
     db = Database()
     db.pool = await create_pool(temp_db_url)
@@ -95,11 +99,16 @@ async def test_backfill_from_legacy_json(temp_db_url):
         assert row["feed_id"] is not None
         assert row["analysis_status"] == "ok"
 
-        kw_count = await conn.fetchrow(
-            "SELECT COUNT(*) AS c FROM article_keywords WHERE article_id = "
-            "(SELECT id FROM articles WHERE link = $1)",
-            "https://example.com/a1",
-        )
-        assert kw_count["c"] >= 2
+    # Phase 4 : drop JSON, backfill devient no-op
+    command.upgrade(cfg, "head")
+    stats2 = await backfill_normalized(db)
+    assert stats2.get("skipped_no_legacy") == 1
+
+    # Donnees normalisees toujours la
+    full = await db.get_article(
+        (await db.get_site_articles(int(site["id"])))[0]["id"]
+    )
+    assert full["images"]
+    assert "python" in full["article_meta"]["keywords"]
 
     await db.close()

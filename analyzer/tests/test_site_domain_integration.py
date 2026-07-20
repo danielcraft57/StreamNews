@@ -1,6 +1,4 @@
 """Integration Postgres : domaine unique + fusion feeds."""
-import json
-
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -49,21 +47,17 @@ async def test_reanalysis_merges_rss_feeds(db, site_id):
 @pytest.mark.asyncio
 async def test_ensure_site_domain_unique_merges_existing_duplicates(db):
     """Simule 2 BFM deja en base avant contrainte UNIQUE."""
-    feed_a = json.dumps([{"url": "https://bfmtv.com/feed-a", "title": "A"}])
-    feed_b = json.dumps([{"url": "https://bfmtv.com/feed-b", "title": "B"}])
     async with db.pool.acquire() as conn:
         if db.is_sqlite:
             await conn.execute("DROP INDEX IF EXISTS sites_domain_key")
             await conn.execute(
                 """
-                INSERT INTO sites (url, status, domain, rss_feeds)
-                VALUES ($1, 'completed', 'bfmtv.com', $2),
-                       ($3, 'completed', 'bfmtv.com', $4)
+                INSERT INTO sites (url, status, domain)
+                VALUES ($1, 'completed', 'bfmtv.com'),
+                       ($2, 'completed', 'bfmtv.com')
                 """,
                 "https://www.bfmtv.com/",
-                feed_a,
                 "https://bfmtv.com/actu",
-                feed_b,
             )
         else:
             await conn.execute(
@@ -71,16 +65,28 @@ async def test_ensure_site_domain_unique_merges_existing_duplicates(db):
             )
             await conn.execute(
                 """
-                INSERT INTO sites (url, status, domain, rss_feeds)
+                INSERT INTO sites (url, status, domain)
                 VALUES
-                    ($1, 'completed', 'bfmtv.com', $2::jsonb),
-                    ($3, 'completed', 'bfmtv.com', $4::jsonb)
+                    ($1, 'completed', 'bfmtv.com'),
+                    ($2, 'completed', 'bfmtv.com')
                 """,
                 "https://www.bfmtv.com/",
-                feed_a,
                 "https://bfmtv.com/actu",
-                feed_b,
             )
+        rows = await conn.fetch(
+            "SELECT id FROM sites WHERE domain = 'bfmtv.com' ORDER BY id"
+        )
+        assert len(rows) == 2
+        await conn.execute(
+            """
+            INSERT INTO rss_feeds (site_id, url, title, feed_type)
+            VALUES ($1, $2, 'A', 'rss'), ($3, $4, 'B', 'rss')
+            """,
+            rows[0]["id"],
+            "https://bfmtv.com/feed-a",
+            rows[1]["id"],
+            "https://bfmtv.com/feed-b",
+        )
 
     deleted = await db.ensure_site_domain_unique()
     assert deleted == 1
