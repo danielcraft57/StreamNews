@@ -12,6 +12,7 @@ from sqlalchemy import engine_from_config, pool
 # analyzer/ sur sys.path pour models.*
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from migrate import _sync_database_url  # noqa: E402
 from models.db_schema import metadata  # noqa: E402
 
 config = context.config
@@ -22,19 +23,10 @@ if config.config_file_name is not None:
 target_metadata = metadata
 
 
-def _sync_url(url: str) -> str:
-    if url.startswith("sqlite+aiosqlite:"):
-        return "sqlite:" + url.split(":", 1)[1]
-    if url.startswith("postgresql+asyncpg:"):
-        return "postgresql+psycopg2:" + url.split(":", 1)[1]
-    return url
-
-
 def get_url() -> str:
-    url = os.getenv("DATABASE_URL")
-    if url:
-        return _sync_url(url)
-    return config.get_main_option("sqlalchemy.url")
+    """URL synchrone, chemin SQLite resolu comme db_backend (repo root)."""
+    url = config.get_main_option("sqlalchemy.url") or os.getenv("DATABASE_URL") or ""
+    return _sync_database_url(url)
 
 
 def run_migrations_offline() -> None:

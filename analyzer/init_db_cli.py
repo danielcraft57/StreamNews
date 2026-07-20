@@ -65,6 +65,18 @@ async def run(reset: bool) -> None:
             log(f"dedupe domaines OK ({dup_sites} fusionnes) (+{time.perf_counter() - t_domain:.1f}s)")
 
             db._dedupe_ensured = True
+
+        t_backfill = time.perf_counter()
+        log("backfill tables normalisees...")
+        from backfill_normalized import backfill_normalized
+
+        stats = await backfill_normalized(db)
+        log(
+            "backfill OK "
+            f"(feeds={stats['rss_feeds']} imgs={stats['article_images']} "
+            f"kw={stats['article_keywords']} analyses={stats['article_analyses']}) "
+            f"(+{time.perf_counter() - t_backfill:.1f}s)"
+        )
     finally:
         await db.close()
 

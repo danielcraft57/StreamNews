@@ -49,22 +49,38 @@ async def test_reanalysis_merges_rss_feeds(db, site_id):
 @pytest.mark.asyncio
 async def test_ensure_site_domain_unique_merges_existing_duplicates(db):
     """Simule 2 BFM deja en base avant contrainte UNIQUE."""
+    feed_a = json.dumps([{"url": "https://bfmtv.com/feed-a", "title": "A"}])
+    feed_b = json.dumps([{"url": "https://bfmtv.com/feed-b", "title": "B"}])
     async with db.pool.acquire() as conn:
-        await conn.execute(
-            "ALTER TABLE sites DROP CONSTRAINT IF EXISTS sites_domain_key"
-        )
-        await conn.execute(
-            """
-            INSERT INTO sites (url, status, domain, rss_feeds)
-            VALUES
-                ($1, 'completed', 'bfmtv.com', $2::jsonb),
-                ($3, 'completed', 'bfmtv.com', $4::jsonb)
-            """,
-            "https://www.bfmtv.com/",
-            json.dumps([{"url": "https://bfmtv.com/feed-a", "title": "A"}]),
-            "https://bfmtv.com/actu",
-            json.dumps([{"url": "https://bfmtv.com/feed-b", "title": "B"}]),
-        )
+        if db.is_sqlite:
+            await conn.execute("DROP INDEX IF EXISTS sites_domain_key")
+            await conn.execute(
+                """
+                INSERT INTO sites (url, status, domain, rss_feeds)
+                VALUES ($1, 'completed', 'bfmtv.com', $2),
+                       ($3, 'completed', 'bfmtv.com', $4)
+                """,
+                "https://www.bfmtv.com/",
+                feed_a,
+                "https://bfmtv.com/actu",
+                feed_b,
+            )
+        else:
+            await conn.execute(
+                "ALTER TABLE sites DROP CONSTRAINT IF EXISTS sites_domain_key"
+            )
+            await conn.execute(
+                """
+                INSERT INTO sites (url, status, domain, rss_feeds)
+                VALUES
+                    ($1, 'completed', 'bfmtv.com', $2::jsonb),
+                    ($3, 'completed', 'bfmtv.com', $4::jsonb)
+                """,
+                "https://www.bfmtv.com/",
+                feed_a,
+                "https://bfmtv.com/actu",
+                feed_b,
+            )
 
     deleted = await db.ensure_site_domain_unique()
     assert deleted == 1
