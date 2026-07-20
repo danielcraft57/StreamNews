@@ -40,20 +40,22 @@ def _send_ws(message: dict) -> None:
         logger.warning("WS push failed: %s", exc)
 
 
+def _article_media_list(article: dict) -> List[dict]:
+    media = article.get("media") or []
+    if media:
+        return [m for m in media if isinstance(m, dict)]
+    out: List[dict] = []
+    for key in ("images", "videos", "audios"):
+        chunk = article.get(key) or []
+        if isinstance(chunk, list):
+            out.extend(m for m in chunk if isinstance(m, dict))
+    return out
+
+
 def _media_captions_for_ner(article: dict) -> Optional[List[dict]]:
     """Alt/title des medias pour enrichir le NER (lien texte <-> image)."""
-    media = article.get("media") or []
-    if not media:
-        # Fallback listes typees si `media` absent
-        media = []
-        for key in ("images", "videos", "audios"):
-            chunk = article.get(key) or []
-            if isinstance(chunk, list):
-                media.extend(chunk)
     captions: List[dict] = []
-    for m in media:
-        if not isinstance(m, dict):
-            continue
+    for m in _article_media_list(article):
         title = (m.get("title") or "").strip()
         alt = (m.get("alt") or "").strip()
         if not title and not alt:
@@ -66,6 +68,32 @@ def _media_captions_for_ner(article: dict) -> Optional[List[dict]]:
             }
         )
     return captions or None
+
+
+def _media_items_for_faces(article: dict) -> Optional[List[dict]]:
+    """Images (url + id) pour face_detect optionnel."""
+    items: List[dict] = []
+    sources = article.get("images") or []
+    if not sources:
+        sources = [
+            m
+            for m in _article_media_list(article)
+            if (m.get("media_type") or "image").lower() in ("image", "img", "")
+        ]
+    for m in sources:
+        if not isinstance(m, dict):
+            continue
+        url = (m.get("url") or "").strip()
+        if not url:
+            continue
+        items.append(
+            {
+                "url": url,
+                "media_id": m.get("id") if isinstance(m.get("id"), int) else None,
+                "media_type": "image",
+            }
+        )
+    return items or None
 
 
 def _run(coro):
@@ -572,6 +600,7 @@ def analyze_article_task(
                     lang_hint = lang_block["lang"]
 
                 media_captions = _media_captions_for_ner(article)
+                media_items = _media_items_for_faces(article)
                 payload = analyze_article_content(
                     article.get("content_text"),
                     article.get("content_html"),
@@ -579,6 +608,7 @@ def analyze_article_task(
                     lang_hint=lang_hint,
                     existing_analysis=existing_analysis,
                     media_captions=media_captions,
+                    media_items=media_items,
                 )
                 await db.update_article_analysis(
                     article_id,

@@ -32,11 +32,13 @@ def analyze_article_content(
     lang_hint: Optional[str] = None,
     existing_analysis: Optional[Dict[str, Any]] = None,
     media_captions: Optional[List[Dict[str, Any]]] = None,
+    media_items: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Prepare le texte et execute les analyseurs demandes."""
     text = prepare_text_for_analysis(content_text, content_html)
     captions = media_captions if media_captions else None
-    if len(text.strip()) < 40 and not captions:
+    media = media_items if media_items else None
+    if len(text.strip()) < 40 and not captions and not media:
         return {
             "analysis_status": "skipped",
             "analysis_error": "contenu insuffisant",
@@ -49,12 +51,20 @@ def analyze_article_content(
         tool = only_list[0]
         results = {
             tool: run_single_analyzer(
-                tool, text, lang_hint=lang_hint, media_captions=captions
+                tool,
+                text,
+                lang_hint=lang_hint,
+                media_captions=captions,
+                media_items=media,
             )
         }
     else:
         results = run_analyzers(
-            text, only=only_list, lang_hint=lang_hint, media_captions=captions
+            text,
+            only=only_list,
+            lang_hint=lang_hint,
+            media_captions=captions,
+            media_items=media,
         )
 
     merged = merge_analysis_results(existing_analysis, results)

@@ -520,6 +520,91 @@ async def sync_article_entities(
         )
 
 
+async def match_faces_by_embedding(
+    conn,
+    *,
+    article_id: int,
+) -> int:
+    """Rattache les faces sans person_id via similarite d'embedding.
+
+    Compare d'abord aux faces deja liees (meme article puis global limite).
+    """
+    try:
+        from text_analysis.face_backends import embeddings_match, unpack_embedding
+    except Exception:
+        return 0
+
+    unlinked = await conn.fetch(
+        """
+        SELECT id, embedding, embedding_dim, media_id
+        FROM article_faces
+        WHERE article_id = $1
+          AND person_id IS NULL
+          AND embedding IS NOT NULL
+        """,
+        article_id,
+    )
+    if not unlinked:
+        return 0
+
+    known = await conn.fetch(
+        """
+        SELECT id, person_id, embedding, embedding_dim
+        FROM article_faces
+        WHERE person_id IS NOT NULL
+          AND embedding IS NOT NULL
+        ORDER BY
+          CASE WHEN article_id = $1 THEN 0 ELSE 1 END,
+          id DESC
+        LIMIT 500
+        """,
+        article_id,
+    )
+    if not known:
+        return 0
+
+    known_vecs = []
+    for k in known:
+        blob = k.get("embedding")
+        if isinstance(blob, memoryview):
+            blob = bytes(blob)
+        if not isinstance(blob, (bytes, bytearray)):
+            continue
+        vec = unpack_embedding(bytes(blob))
+        if not vec:
+            continue
+        known_vecs.append((int(k["person_id"]), vec, int(k.get("embedding_dim") or len(vec))))
+
+    linked = 0
+    for face in unlinked:
+        blob = face.get("embedding")
+        if isinstance(blob, memoryview):
+            blob = bytes(blob)
+        if not isinstance(blob, (bytes, bytearray)):
+            continue
+        vec = unpack_embedding(bytes(blob))
+        if not vec:
+            continue
+        dim = int(face.get("embedding_dim") or len(vec))
+        metric = "cosine" if dim >= 256 else "euclidean"
+        best_person = None
+        for person_id, known_vec, known_dim in known_vecs:
+            if known_dim != dim and len(known_vec) != len(vec):
+                continue
+            if embeddings_match(vec, known_vec, metric=metric):
+                best_person = person_id
+                break
+        if best_person is None:
+            continue
+        await conn.execute(
+            "UPDATE article_faces SET person_id = $1 WHERE id = $2 AND person_id IS NULL",
+            best_person,
+            int(face["id"]),
+        )
+        linked += 1
+    return linked
+
+
 async def sync_article_faces(
     conn,
     *,
@@ -527,15 +612,28 @@ async def sync_article_faces(
     article_id: int,
     faces: Any,
     tool_name: str = "face_detect",
+    link_persons: bool = True,
 ) -> None:
     if not isinstance(faces, list):
         return
     tool = (tool_name or "face_detect")[:100]
+    try:
+        from text_analysis.face_backends import pack_embedding
+    except Exception:
+        pack_embedding = None
+
     for face in faces:
         if not isinstance(face, dict):
             continue
         bbox = face.get("bbox") if isinstance(face.get("bbox"), dict) else {}
         embedding = face.get("embedding")
+        embedding_dim = face.get("embedding_dim")
+        if isinstance(embedding, list) and pack_embedding is not None:
+            try:
+                embedding_dim = embedding_dim or len(embedding)
+                embedding = pack_embedding([float(v) for v in embedding])
+            except Exception:
+                embedding = None
         if embedding is not None and not isinstance(embedding, (bytes, bytearray)):
             embedding = None
         await conn.execute(
@@ -555,10 +653,16 @@ async def sync_article_faces(
             str(face.get("bbox_unit") or bbox.get("unit") or "ratio")[:20],
             face.get("confidence"),
             embedding,
-            face.get("embedding_dim"),
+            embedding_dim,
             tool,
             parse_dt(face.get("detected_at")),
         )
+
+    if link_persons:
+        await link_persons_from_entities(
+            conn, is_sqlite=is_sqlite, article_id=article_id
+        )
+        await match_faces_by_embedding(conn, article_id=article_id)
 
 
 async def sync_article_keywords(

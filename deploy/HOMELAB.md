@@ -93,4 +93,7 @@ Schema normalise (Alembic) : tables `rss_feeds`, `article_media` (image/video/au
 
 Apres un gros crawl : `ANALYZE` (SQLite) ou laisser autovacuum (Postgres).
 
-Visages : tables pretes ; stub `face_detect` jusqu'a brancher InsightFace ou face_recognition.
+Visages : optionnel (`FACE_DETECT_ENABLED=0` par defaut). Backends
+`face_recognition` ou `insightface` via `FACE_DETECT_BACKEND` +
+`pip install -r analyzer/requirements-faces.txt`. Embeddings stockes dans
+`article_faces` ; match auto vers `persons` (media NER + similarite).

@@ -135,6 +135,10 @@ Adapte ensuite `/opt/streamnews/.env` si besoin.
 cd analyzer && pip install -r requirements.txt -r requirements-dev.txt && pytest -q
 cd web && npm ci && npm test
 
+# Reco faciale (optionnel, off par defaut) :
+# pip install -r analyzer/requirements-faces.txt
+# FACE_DETECT_ENABLED=1 FACE_DETECT_BACKEND=insightface
+
 # E2E (Postgres + Redis locaux requis)
 bash scripts/e2e-stack.sh
 cd e2e && npm install && npx playwright install chromium && npm test
