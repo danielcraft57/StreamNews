@@ -33,26 +33,25 @@ async def run(reset: bool) -> None:
     db = Database()
     log(f"backend={db.backend} url={_mask_url(db.database_url)} (+{time.perf_counter() - t0:.1f}s)")
 
-    t_pool = time.perf_counter()
-    log("connexion pool...")
-    from db_backend import create_pool
-
-    db.pool = await create_pool(db.database_url)
-    db.backend = getattr(db.pool, "backend", db.backend)
-    log(f"pool OK ({db.backend}) (+{time.perf_counter() - t_pool:.1f}s)")
-
     try:
         do_reset = reset or os.getenv("STREAMNEWS_RESET_DB", "").strip() in ("1", "true", "yes")
         if do_reset:
-            log("reset demande: DROP + recreate schema")
+            log("reset demande: alembic downgrade base + upgrade head")
 
         t_schema = time.perf_counter()
-        log(f"schema ({db.backend})...")
-        if db.is_sqlite:
-            await db._init_schema_sqlite(do_reset)
-        else:
-            await db._init_schema_postgres(do_reset)
-        log(f"schema OK (+{time.perf_counter() - t_schema:.1f}s)")
+        log(f"migrations Alembic ({db.backend})...")
+        from migrate import run_migrations
+
+        run_migrations(db.database_url, reset=do_reset)
+        log(f"migrations OK (+{time.perf_counter() - t_schema:.1f}s)")
+
+        t_pool = time.perf_counter()
+        log("connexion pool...")
+        from db_backend import create_pool
+
+        db.pool = await create_pool(db.database_url)
+        db.backend = getattr(db.pool, "backend", db.backend)
+        log(f"pool OK ({db.backend}) (+{time.perf_counter() - t_pool:.1f}s)")
 
         if not getattr(db, "_dedupe_ensured", False):
             t_dedupe = time.perf_counter()

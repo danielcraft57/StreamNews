@@ -123,21 +123,20 @@ class Database:
         return out
 
     async def init_db(self, reset: bool = False):
-        """Initialise la connexion et le schema (pas de migrations).
+        """Initialise la connexion, migrations Alembic et backfill dedupe.
 
-        reset=True ou STREAMNEWS_RESET_DB=1 : DROP + recreate (pages/articles CASCADE).
+        reset=True ou STREAMNEWS_RESET_DB=1 : downgrade base + upgrade head.
         Backend : Postgres (prod) ou SQLite (local) selon DATABASE_URL.
         """
-        self.pool = await create_pool(self.database_url)
-        self.backend = getattr(self.pool, "backend", self.backend)
         do_reset = reset or os.getenv("STREAMNEWS_RESET_DB", "").strip() in ("1", "true", "yes")
 
-        if self.is_sqlite:
-            await self._init_schema_sqlite(do_reset)
-        else:
-            await self._init_schema_postgres(do_reset)
+        from migrate import run_migrations
 
-        # Backfill dedupe une seule fois par process (evite de rescanner a chaque tache)
+        run_migrations(self.database_url, reset=do_reset)
+
+        self.pool = await create_pool(self.database_url)
+        self.backend = getattr(self.pool, "backend", self.backend)
+
         if not getattr(self, "_dedupe_ensured", False):
             deleted = await self.ensure_article_dedupe()
             dup_sites = await self.ensure_site_domain_unique()
@@ -147,243 +146,6 @@ class Database:
                 logging.getLogger(__name__).info(
                     "Dedupe: %s articles, %s sites fusionnes", deleted, dup_sites
                 )
-
-    async def _init_schema_sqlite(self, do_reset: bool):
-        async with self.pool.acquire() as conn:
-            if do_reset:
-                await conn.execute("DROP TABLE IF EXISTS articles")
-                await conn.execute("DROP TABLE IF EXISTS pages")
-                await conn.execute("DROP TABLE IF EXISTS sites")
-
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS sites (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    url VARCHAR(500) NOT NULL,
-                    status VARCHAR(50) NOT NULL DEFAULT 'pending',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    total_pages_analyzed INTEGER DEFAULT 0,
-                    rss_feeds TEXT DEFAULT '[]',
-                    celery_task_id VARCHAR(255),
-                    site_title VARCHAR(500),
-                    favicon_url VARCHAR(1000),
-                    meta_description TEXT,
-                    meta_extra TEXT DEFAULT '{}',
-                    domain VARCHAR(255)
-                )
-            """)
-            for col_sql in (
-                "ALTER TABLE sites ADD COLUMN celery_task_id VARCHAR(255)",
-                "ALTER TABLE sites ADD COLUMN site_title VARCHAR(500)",
-                "ALTER TABLE sites ADD COLUMN favicon_url VARCHAR(1000)",
-                "ALTER TABLE sites ADD COLUMN meta_description TEXT",
-                "ALTER TABLE sites ADD COLUMN meta_extra TEXT DEFAULT '{}'",
-                "ALTER TABLE sites ADD COLUMN domain VARCHAR(255)",
-            ):
-                try:
-                    await conn.execute(col_sql)
-                except Exception:
-                    pass
-
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS pages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-                    url VARCHAR(1000) NOT NULL,
-                    title VARCHAR(500),
-                    rss_feeds TEXT DEFAULT '[]',
-                    analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS articles (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-                    feed_url VARCHAR(1000) NOT NULL,
-                    title VARCHAR(1000),
-                    link VARCHAR(2000) NOT NULL,
-                    summary TEXT,
-                    author VARCHAR(500),
-                    published_at TIMESTAMP,
-                    guid VARCHAR(2000),
-                    dedupe_key VARCHAR(2100) NOT NULL DEFAULT '',
-                    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    content_html TEXT,
-                    content_text TEXT,
-                    images TEXT DEFAULT '[]',
-                    article_meta TEXT DEFAULT '{}',
-                    enriched_at TIMESTAMP,
-                    enrich_status VARCHAR(50),
-                    enrich_error TEXT,
-                    UNIQUE (site_id, link)
-                )
-            """)
-            for col_sql in (
-                "ALTER TABLE articles ADD COLUMN dedupe_key VARCHAR(2100) NOT NULL DEFAULT ''",
-                "ALTER TABLE articles ADD COLUMN content_html TEXT",
-                "ALTER TABLE articles ADD COLUMN content_text TEXT",
-                "ALTER TABLE articles ADD COLUMN images TEXT DEFAULT '[]'",
-                "ALTER TABLE articles ADD COLUMN article_meta TEXT DEFAULT '{}'",
-                "ALTER TABLE articles ADD COLUMN enriched_at TIMESTAMP",
-                "ALTER TABLE articles ADD COLUMN enrich_status VARCHAR(50)",
-                "ALTER TABLE articles ADD COLUMN enrich_error TEXT",
-            ):
-                try:
-                    await conn.execute(col_sql)
-                except Exception:
-                    pass
-
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_articles_site_published
-                ON articles (site_id, published_at DESC)
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_articles_enrich_status
-                ON articles (site_id, enrich_status)
-            """)
-
-    async def _init_schema_postgres(self, do_reset: bool):
-        async with self.pool.acquire() as conn:
-            if do_reset:
-                await conn.execute("DROP TABLE IF EXISTS articles CASCADE")
-                await conn.execute("DROP TABLE IF EXISTS pages CASCADE")
-                await conn.execute("DROP TABLE IF EXISTS sites CASCADE")
-
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS sites (
-                    id SERIAL PRIMARY KEY,
-                    url VARCHAR(500) NOT NULL,
-                    status VARCHAR(50) NOT NULL DEFAULT 'pending',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    total_pages_analyzed INTEGER DEFAULT 0,
-                    rss_feeds JSONB DEFAULT '[]'::jsonb,
-                    celery_task_id VARCHAR(255),
-                    site_title VARCHAR(500),
-                    favicon_url VARCHAR(1000),
-                    meta_description TEXT,
-                    meta_extra JSONB DEFAULT '{}'::jsonb,
-                    domain VARCHAR(255)
-                )
-            """)
-            await conn.execute("""
-                ALTER TABLE sites
-                ADD COLUMN IF NOT EXISTS celery_task_id VARCHAR(255)
-            """)
-            await conn.execute("""
-                ALTER TABLE sites
-                ADD COLUMN IF NOT EXISTS site_title VARCHAR(500)
-            """)
-            await conn.execute("""
-                ALTER TABLE sites
-                ADD COLUMN IF NOT EXISTS favicon_url VARCHAR(1000)
-            """)
-            await conn.execute("""
-                ALTER TABLE sites
-                ADD COLUMN IF NOT EXISTS meta_description TEXT
-            """)
-            await conn.execute("""
-                ALTER TABLE sites
-                ADD COLUMN IF NOT EXISTS meta_extra JSONB DEFAULT '{}'::jsonb
-            """)
-            await conn.execute("""
-                ALTER TABLE sites
-                ADD COLUMN IF NOT EXISTS domain VARCHAR(255)
-            """)
-
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS pages (
-                    id SERIAL PRIMARY KEY,
-                    site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-                    url VARCHAR(1000) NOT NULL,
-                    title VARCHAR(500),
-                    rss_feeds JSONB DEFAULT '[]'::jsonb,
-                    analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS articles (
-                    id SERIAL PRIMARY KEY,
-                    site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-                    feed_url VARCHAR(1000) NOT NULL,
-                    title VARCHAR(1000),
-                    link VARCHAR(2000) NOT NULL,
-                    summary TEXT,
-                    author VARCHAR(500),
-                    published_at TIMESTAMP,
-                    guid VARCHAR(2000),
-                    dedupe_key VARCHAR(2100) NOT NULL DEFAULT '',
-                    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    content_html TEXT,
-                    content_text TEXT,
-                    images JSONB DEFAULT '[]'::jsonb,
-                    article_meta JSONB DEFAULT '{}'::jsonb,
-                    enriched_at TIMESTAMP,
-                    enrich_status VARCHAR(50),
-                    enrich_error TEXT,
-                    UNIQUE (site_id, link)
-                )
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS dedupe_key VARCHAR(2100) NOT NULL DEFAULT ''
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS content_html TEXT
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS content_text TEXT
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]'::jsonb
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS article_meta JSONB DEFAULT '{}'::jsonb
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMP
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS enrich_status VARCHAR(50)
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS enrich_error TEXT
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_articles_site_published
-                ON articles (site_id, published_at DESC NULLS LAST)
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_articles_enrich_status
-                ON articles (site_id, enrich_status)
-            """)
-
-            # Installs existantes : forcer ON DELETE CASCADE sans migration
-            await conn.execute("""
-                DO $$
-                BEGIN
-                    ALTER TABLE pages DROP CONSTRAINT IF EXISTS pages_site_id_fkey;
-                    ALTER TABLE pages
-                        ADD CONSTRAINT pages_site_id_fkey
-                        FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE;
-
-                    ALTER TABLE articles DROP CONSTRAINT IF EXISTS articles_site_id_fkey;
-                    ALTER TABLE articles
-                        ADD CONSTRAINT articles_site_id_fkey
-                        FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE;
-                EXCEPTION WHEN others THEN
-                    NULL;
-                END $$;
-            """)
 
     @staticmethod
     def merge_rss_feeds(existing: List[Dict], new: List[Dict]) -> List[Dict]:
