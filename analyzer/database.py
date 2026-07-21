@@ -723,7 +723,7 @@ class Database:
                     content_text = COALESCE($3, content_text),
                     enrich_status = $4,
                     enrich_error = $5,
-                    enriched_at = CASE WHEN $4 = 'ok' THEN CURRENT_TIMESTAMP ELSE enriched_at END,
+                    enriched_at = CASE WHEN $8 = 'ok' THEN CURRENT_TIMESTAMP ELSE enriched_at END,
                     title = COALESCE($6, title),
                     author = COALESCE($7, author)
                 WHERE id = $1
@@ -735,6 +735,7 @@ class Database:
                 enrich_error,
                 ((title or "")[:1000] or None) if title is not None else None,
                 ((author or "")[:500] or None) if author is not None else None,
+                enrich_status,
             )
             from repositories.normalized_sync import sync_article_after_enrichment
 
