@@ -486,12 +486,34 @@ class Database:
                 )
 
     async def add_page_analysis(self, site_id: int, url: str, title: str = None, rss_feeds: List[Dict] = None):
-        """Ajoute l'analyse d'une page ; feeds -> table rss_feeds."""
+        """Ajoute ou met a jour une page (unique site_id+url) ; feeds -> rss_feeds."""
         async with self.pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO pages (site_id, url, title) VALUES ($1, $2, $3)",
-                site_id, url, title
-            )
+            if self.is_sqlite:
+                await conn.execute(
+                    """
+                    INSERT INTO pages (site_id, url, title)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT(site_id, url) DO UPDATE SET
+                        title = excluded.title,
+                        analyzed_at = CURRENT_TIMESTAMP
+                    """,
+                    site_id,
+                    url,
+                    title,
+                )
+            else:
+                await conn.execute(
+                    """
+                    INSERT INTO pages (site_id, url, title)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (site_id, url) DO UPDATE SET
+                        title = EXCLUDED.title,
+                        analyzed_at = CURRENT_TIMESTAMP
+                    """,
+                    site_id,
+                    url,
+                    title,
+                )
             from repositories.normalized_sync import sync_rss_feeds_list
 
             page = await conn.fetchrow(

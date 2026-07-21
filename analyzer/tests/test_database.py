@@ -81,6 +81,7 @@ async def test_add_page_analysis_serializes_feeds():
     assert args[2] == "https://example.com/page"
     assert args[3] == "Title"
     assert "INSERT INTO pages" in args[0]
+    assert "ON CONFLICT" in args[0]
     assert "rss_feeds" not in args[0]
 
 
