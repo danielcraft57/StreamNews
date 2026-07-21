@@ -1,0 +1,6 @@
+{
+  "watch": ["server.js", "logger.js"],
+  "ext": "js,json",
+  "ignore": ["node_modules/**", "tests/**"],
+  "delay": 300
+}

@@ -16,13 +16,17 @@ async def test_pages_stored_per_site(db, site_id):
     await db.add_page_analysis(
         site_id, "https://example.com/blog", "Blog", []
     )
+    # Reanalyse meme URL : upsert, pas de conflit unique
+    await db.add_page_analysis(
+        site_id, "https://example.com/", "Accueil v2", feeds
+    )
 
     pages = await db.get_site_pages(site_id)
     assert len(pages) == 2
     titles = {p["title"] for p in pages}
-    assert "Accueil" in titles
+    assert "Accueil v2" in titles
     assert "Blog" in titles
-    home = next(p for p in pages if p["title"] == "Accueil")
+    home = next(p for p in pages if p["title"] == "Accueil v2")
     assert home["rss_feeds"][0]["url"] == "https://example.com/rss"
 
 

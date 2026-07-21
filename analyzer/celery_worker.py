@@ -16,6 +16,8 @@ import tasks  # noqa: F401, E402  register tasks
 
 from tasks import (  # noqa: E402
     analyze_site_task,
+    analyze_article_task,
+    analyze_site_articles_task,
     cleanup_old_analyses,
     crawl_site_task,
     enrich_article_task,
@@ -27,6 +29,8 @@ from tasks import (  # noqa: E402
 __all__ = [
     "celery_app",
     "analyze_site_task",
+    "analyze_article_task",
+    "analyze_site_articles_task",
     "cleanup_old_analyses",
     "crawl_site_task",
     "enrich_article_task",

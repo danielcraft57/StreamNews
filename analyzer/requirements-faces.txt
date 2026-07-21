@@ -1,0 +1,21 @@
+# Dependances OPTIONNELLES - reconnaissance faciale
+# N'est PAS installee par scripts/install.sh par defaut.
+#
+# Usage :
+#   pip install -r analyzer/requirements-faces.txt
+#   # dans .env.local :
+#   FACE_DETECT_ENABLED=1
+#   FACE_DETECT_BACKEND=face_recognition
+#   # ou : FACE_DETECT_BACKEND=insightface
+#
+# Note Windows : face_recognition / dlib peut etre penible a compiler.
+# Preferer insightface + onnxruntime si besoin.
+
+Pillow>=10.0.0
+numpy>=1.24.0
+opencv-python-headless>=4.8.0
+
+# Choisis UN backend (ou les deux pour tester) :
+# face_recognition>=1.3.0
+# insightface>=0.7.3
+# onnxruntime>=1.16.0

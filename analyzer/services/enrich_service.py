@@ -13,6 +13,12 @@ import trafilatura
 from bs4 import BeautifulSoup
 
 from logging_config import get_logger
+from text_analysis.clean import strip_links_from_html, strip_urls_from_text
+from utils.image_urls import (
+    build_images_list,
+    pick_primary_image,
+    strip_primary_image_from_html,
+)
 
 logger = get_logger(__name__)
 
@@ -33,7 +39,7 @@ _ARTICLE_TYPES = {
 
 _ALLOWED_TAGS = [
     "p", "br", "h1", "h2", "h3", "h4", "h5", "h6",
-    "ul", "ol", "li", "a", "strong", "em", "b", "i",
+    "ul", "ol", "li", "strong", "em", "b", "i",
     "blockquote", "img", "figure", "figcaption",
     "span", "div", "pre", "code", "hr", "table",
     "thead", "tbody", "tr", "th", "td",
@@ -184,8 +190,137 @@ def _pick_jsonld_article(soup: BeautifulSoup, base_url: str) -> Dict[str, Any]:
                 meta["images"] = images
             if node.get("articleBody"):
                 meta["article_body"] = _first_str(node.get("articleBody"))
+            kw = node.get("keywords")
+            if kw:
+                if isinstance(kw, str):
+                    meta["keywords"] = [k.strip() for k in kw.split(",") if k.strip()]
+                else:
+                    meta["keywords"] = [_first_str(k) for k in _as_list(kw) if _first_str(k)]
             return meta
     return meta
+
+
+def _pick_rdfa(soup: BeautifulSoup, base_url: str) -> Dict[str, Any]:
+    """RDFa : property og:* / schema:* et typeof Article."""
+    meta: Dict[str, Any] = {}
+    prop_map = {
+        "og:title": "title",
+        "og:description": "description",
+        "og:image": "images",
+        "twitter:title": "title",
+        "twitter:description": "description",
+        "twitter:image": "images",
+        "schema:headline": "title",
+        "schema:name": "title",
+        "schema:description": "description",
+        "schema:datePublished": "date_published",
+        "schema:dateModified": "date_modified",
+        "schema:author": "author",
+        "schema:image": "images",
+    }
+    for el in soup.find_all(attrs={"property": True}):
+        prop = (el.get("property") or "").strip().lower()
+        key = prop_map.get(prop)
+        if not key:
+            continue
+        val = _itemprop_text(el)
+        if not val:
+            continue
+        if key == "images":
+            urls = _image_urls(val, base_url)
+            if urls:
+                meta.setdefault("images", []).extend(urls)
+        elif key == "author" and "author" not in meta:
+            meta["author"] = val
+        elif key not in meta:
+            meta[key] = val
+
+    for scope in soup.find_all(attrs={"typeof": True}):
+        typeof = (scope.get("typeof") or "").lower()
+        type_name = typeof.rsplit(":", 1)[-1]
+        if type_name not in _ARTICLE_TYPES:
+            continue
+        meta.setdefault("schema_type", type_name)
+        for prop, key in (
+            ("headline", "title"), ("name", "title"), ("description", "description"),
+            ("datePublished", "date_published"), ("dateModified", "date_modified"),
+            ("image", "images"),
+        ):
+            el = scope.find(attrs={"property": re.compile(rf"(schema:)?{prop}$", re.I)})
+            if not el:
+                continue
+            val = _itemprop_text(el)
+            if not val:
+                continue
+            if key == "images":
+                urls = _image_urls(val, base_url)
+                if urls:
+                    meta.setdefault("images", []).extend(urls)
+            elif key not in meta:
+                meta[key] = val
+        author_el = scope.find(attrs={"property": re.compile(r"(schema:)?author$", re.I)})
+        if author_el and "author" not in meta:
+            name_el = author_el.find(attrs={"property": re.compile(r"(schema:)?name$", re.I)})
+            meta["author"] = _itemprop_text(name_el or author_el)
+
+    if meta:
+        meta["source"] = "rdfa"
+    return meta
+
+
+def _pick_dublin_core(soup: BeautifulSoup) -> Dict[str, Any]:
+    meta: Dict[str, Any] = {}
+    dc_map = {
+        "dc.title": "title",
+        "dcterms.title": "title",
+        "dc.description": "description",
+        "dcterms.abstract": "description",
+        "dc.creator": "author",
+        "dcterms.created": "date_published",
+        "dcterms.modified": "date_modified",
+        "dc.subject": "keywords",
+    }
+    for tag in soup.find_all("meta"):
+        name = (tag.get("name") or tag.get("property") or "").strip().lower()
+        key = dc_map.get(name)
+        content = (tag.get("content") or "").strip()
+        if not key or not content:
+            continue
+        if key == "keywords":
+            meta.setdefault("keywords", []).append(content)
+        elif key not in meta:
+            meta[key] = content
+    if meta:
+        meta["source"] = "dublin-core"
+    return meta
+
+
+def _pick_page_links(soup: BeautifulSoup, base_url: str) -> Dict[str, Any]:
+    meta: Dict[str, Any] = {}
+    canonical = soup.find("link", rel=lambda v: v and "canonical" in str(v).lower())
+    if canonical and canonical.get("href"):
+        meta["canonical_url"] = urljoin(base_url, canonical["href"].strip())
+    icon = (
+        soup.find("link", rel=lambda v: v and "icon" in str(v).lower() and "apple" not in str(v).lower())
+        or soup.find("link", rel="shortcut icon")
+    )
+    if icon and icon.get("href"):
+        meta["favicon_url"] = urljoin(base_url, icon["href"].strip())
+    keywords = _meta_content(soup, "keywords", "news_keywords")
+    if keywords:
+        meta["keywords"] = [k.strip() for k in keywords.split(",") if k.strip()]
+    if meta:
+        meta["source"] = "page-meta"
+    return meta
+
+
+def _reading_time_minutes(text: Optional[str]) -> Optional[int]:
+    if not text:
+        return None
+    words = len(re.findall(r"\w+", text, flags=re.UNICODE))
+    if words < 40:
+        return None
+    return max(1, round(words / 200))
 
 
 def _meta_content(soup: BeautifulSoup, *keys: str) -> Optional[str]:
@@ -276,6 +411,7 @@ def _pick_microdata(soup: BeautifulSoup, base_url: str) -> Dict[str, Any]:
 def _merge_meta(*parts: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {"sources": []}
     images: List[str] = []
+    keywords: List[str] = []
     for part in parts:
         if not part:
             continue
@@ -285,27 +421,35 @@ def _merge_meta(*parts: Dict[str, Any]) -> Dict[str, Any]:
         for key in (
             "title", "description", "author", "date_published",
             "date_modified", "schema_type", "og_type", "article_body",
+            "canonical_url", "favicon_url",
         ):
             if key not in out and part.get(key):
                 out[key] = part[key]
+        for kw in part.get("keywords") or []:
+            label = str(kw).strip()
+            if label and label.lower() not in {k.lower() for k in keywords}:
+                keywords.append(label)
         for url in part.get("images") or []:
             if url not in images:
                 images.append(url)
     if images:
         out["images"] = images
+    if keywords:
+        out["keywords"] = keywords[:30]
     return out
 
 
 def _sanitize_html(html: Optional[str]) -> str:
     if not html:
         return ""
-    return bleach.clean(
+    cleaned = bleach.clean(
         html,
         tags=_ALLOWED_TAGS,
         attributes=_ALLOWED_ATTRS,
         protocols=["http", "https", "mailto"],
         strip=True,
     )
+    return strip_links_from_html(cleaned)
 
 
 def _images_from_html(html: str, base_url: str, limit: int = 12) -> List[Dict[str, str]]:
@@ -328,10 +472,85 @@ def _images_from_html(html: str, base_url: str, limit: int = 12) -> List[Dict[st
             "url": abs_url,
             "alt": (img.get("alt") or "")[:300],
             "source": "content",
+            "media_type": "image",
         })
         if len(out) >= limit:
             break
     return out
+
+
+def _videos_from_html(html: str, base_url: str, limit: int = 6) -> List[Dict[str, Any]]:
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "lxml")
+    out: List[Dict[str, Any]] = []
+    seen = set()
+
+    def add(url: Optional[str], *, mime: Optional[str] = None, poster: Optional[str] = None) -> None:
+        if not url:
+            return
+        abs_url = urljoin(base_url, url.strip())
+        if not abs_url.startswith(("http://", "https://")) or abs_url in seen:
+            return
+        seen.add(abs_url)
+        item: Dict[str, Any] = {
+            "url": abs_url,
+            "media_type": "video",
+            "source": "content",
+        }
+        if mime:
+            item["mime_type"] = mime
+        if poster:
+            item["thumbnail_url"] = urljoin(base_url, poster.strip())
+        out.append(item)
+
+    for video in soup.find_all("video"):
+        poster = video.get("poster")
+        src = video.get("src")
+        if src:
+            add(src, poster=poster)
+        for source in video.find_all("source"):
+            add(source.get("src"), mime=source.get("type"), poster=poster)
+        if len(out) >= limit:
+            return out[:limit]
+
+    for iframe in soup.find_all("iframe"):
+        src = iframe.get("src") or ""
+        low = src.lower()
+        if any(x in low for x in ("youtube.com", "youtu.be", "vimeo.com", "dailymotion.com")):
+            add(src)
+        if len(out) >= limit:
+            break
+    return out[:limit]
+
+
+def _audios_from_html(html: str, base_url: str, limit: int = 6) -> List[Dict[str, Any]]:
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "lxml")
+    out: List[Dict[str, Any]] = []
+    seen = set()
+
+    def add(url: Optional[str], *, mime: Optional[str] = None) -> None:
+        if not url:
+            return
+        abs_url = urljoin(base_url, url.strip())
+        if not abs_url.startswith(("http://", "https://")) or abs_url in seen:
+            return
+        seen.add(abs_url)
+        item: Dict[str, Any] = {"url": abs_url, "media_type": "audio", "source": "content"}
+        if mime:
+            item["mime_type"] = mime
+        out.append(item)
+
+    for audio in soup.find_all("audio"):
+        if audio.get("src"):
+            add(audio.get("src"))
+        for source in audio.find_all("source"):
+            add(source.get("src"), mime=source.get("type"))
+        if len(out) >= limit:
+            break
+    return out[:limit]
 
 
 def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
@@ -343,6 +562,8 @@ def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
             "content_html": "",
             "content_text": "",
             "images": [],
+            "videos": [],
+            "audios": [],
             "article_meta": {},
         }
 
@@ -352,7 +573,10 @@ def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
     ld = _pick_jsonld_article(soup, base_url)
     og = _pick_opengraph(soup, base_url)
     md = _pick_microdata(soup, base_url)
-    merged = _merge_meta(ld, og, md)
+    rdfa = _pick_rdfa(soup, base_url)
+    dc = _pick_dublin_core(soup)
+    page = _pick_page_links(soup, base_url)
+    merged = _merge_meta(ld, og, md, rdfa, dc, page)
 
     content_html = ""
     content_text = ""
@@ -364,7 +588,7 @@ def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
             include_comments=False,
             include_tables=True,
             include_images=True,
-            include_links=True,
+            include_links=False,
             output_format="html",
             favor_recall=True,
         )
@@ -382,12 +606,12 @@ def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
             favor_recall=True,
         )
         if text:
-            content_text = text.strip()
+            content_text = strip_urls_from_text(text.strip())
     except Exception as exc:
         logger.warning("trafilatura text failed for %s: %s", page_url, exc)
 
     if not content_text and merged.get("article_body"):
-        content_text = str(merged["article_body"]).strip()
+        content_text = strip_urls_from_text(str(merged["article_body"]).strip())
         if not content_html:
             content_html = _sanitize_html(
                 "<p>" + bleach.clean(content_text, tags=[], strip=True) + "</p>"
@@ -401,16 +625,30 @@ def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
 
     images: List[Dict[str, str]] = []
     seen = set()
+    meta_urls: List[str] = []
     for url in merged.get("images") or []:
         if url in seen:
             continue
         seen.add(url)
-        images.append({"url": url, "alt": "", "source": "meta"})
-    for img in _images_from_html(content_html, base_url):
-        if img["url"] in seen:
-            continue
-        seen.add(img["url"])
-        images.append(img)
+        meta_urls.append(url)
+
+    content_imgs = _images_from_html(content_html, base_url)
+    og_img = _meta_content(soup, "og:image")
+    tw_img = _meta_content(soup, "twitter:image")
+    primary = pick_primary_image(
+        og_url=og_img,
+        twitter_url=tw_img,
+        meta_urls=meta_urls,
+        content_images=content_imgs,
+        base_url=base_url,
+    )
+    images = build_images_list(primary, meta_urls, content_imgs)
+
+    if primary and content_html:
+        content_html = strip_primary_image_from_html(content_html, primary, base_url)
+
+    videos = _videos_from_html(html, base_url)
+    audios = _audios_from_html(html, base_url)
 
     article_meta = {
         k: v
@@ -420,6 +658,11 @@ def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
     article_meta["page_url"] = page_url
     if urlparse(page_url).netloc:
         article_meta["domain"] = urlparse(page_url).netloc.lower()
+    if primary and primary.get("url"):
+        article_meta["primary_image"] = primary["url"]
+    rt = _reading_time_minutes(content_text or merged.get("article_body"))
+    if rt:
+        article_meta["reading_time_minutes"] = rt
 
     return {
         "title": merged.get("title"),
@@ -427,6 +670,8 @@ def extract_from_html(html: str, page_url: str) -> Dict[str, Any]:
         "content_html": content_html,
         "content_text": content_text,
         "images": images[:20],
+        "videos": videos,
+        "audios": audios,
         "article_meta": article_meta,
     }
 

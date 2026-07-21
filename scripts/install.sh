@@ -22,13 +22,14 @@ source .venv/bin/activate
 
 pip install --upgrade pip
 pip install -r analyzer/requirements.txt
+pip install -r analyzer/requirements-dev.txt
 
 cd web
 npm ci
 cd "$ROOT"
 
 echo "Install OK."
-echo "  Local (SQLite + Redis distant) : bash scripts/init-db.sh --local && bash scripts/dev.sh --local"
+echo "  Local (SQLite + Redis node14) : bash scripts/init-db.sh --local && bash scripts/dev.sh --local"
 echo "  Prod-like (.env Postgres)     : edite .env (remplace CHANGE_ME), puis init-db + dev.sh"
 if grep -q 'CHANGE_ME' .env 2>/dev/null; then
   echo "ATTENTION: .env contient encore CHANGE_ME — a remplacer avant un usage Postgres."

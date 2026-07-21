@@ -249,6 +249,51 @@ app.post('/api/sites/:id/enrich-articles', async (req, res) => {
     }
 });
 
+app.post('/api/articles/:id/analyze', async (req, res) => {
+    try {
+        const response = await axios.post(
+            `${ANALYZER_URL}/articles/${req.params.id}/analyze`,
+            {},
+            {
+                timeout: 15000,
+                params: {
+                    force: req.query.force === '1' || req.query.force === 'true',
+                    tools: req.query.tools || undefined,
+                }
+            }
+        );
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur lors de l\'analyse texte:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors de l\'analyse texte',
+            details: error.response?.data?.detail || error.message
+        });
+    }
+});
+
+app.post('/api/sites/:id/analyze-articles', async (req, res) => {
+    try {
+        const response = await axios.post(
+            `${ANALYZER_URL}/sites/${req.params.id}/analyze-articles`,
+            {},
+            {
+                timeout: 30000,
+                params: { limit: req.query.limit || 50 }
+            }
+        );
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur lors de l\'analyse bulk:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors de l\'analyse des articles',
+            details: error.response?.data?.detail || error.message
+        });
+    }
+});
+
 // Route pour recevoir les messages WebSocket du service d'analyse
 app.post('/api/websocket', (req, res) => {
     try {

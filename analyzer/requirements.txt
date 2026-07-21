@@ -18,3 +18,9 @@ alembic==1.13.1
 python-multipart==0.0.6
 trafilatura==1.12.0
 bleach==6.1.0
+langdetect==1.0.9
+yake==0.4.8
+simhash==2.1.2
+sumy==0.11.0
+nltk==3.9.1
+spacy==3.7.5

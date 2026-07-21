@@ -171,6 +171,10 @@ class SqlitePool:
         self._conn.row_factory = aiosqlite.Row
         await self._conn.execute("PRAGMA foreign_keys = ON")
         await self._conn.execute("PRAGMA journal_mode = WAL")
+        await self._conn.execute("PRAGMA synchronous = NORMAL")
+        await self._conn.execute("PRAGMA temp_store = MEMORY")
+        await self._conn.execute("PRAGMA cache_size = -64000")  # ~64 Mo
+        await self._conn.execute("PRAGMA mmap_size = 268435456")  # 256 Mo
         await self._conn.commit()
         return self
 
@@ -182,6 +186,10 @@ class SqlitePool:
 
     async def close(self):
         if self._conn is not None:
+            try:
+                await self._conn.commit()
+            except Exception:
+                pass
             await self._conn.close()
             self._conn = None
 

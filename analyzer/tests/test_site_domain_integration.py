@@ -1,6 +1,4 @@
 """Integration Postgres : domaine unique + fusion feeds."""
-import json
-
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -50,20 +48,44 @@ async def test_reanalysis_merges_rss_feeds(db, site_id):
 async def test_ensure_site_domain_unique_merges_existing_duplicates(db):
     """Simule 2 BFM deja en base avant contrainte UNIQUE."""
     async with db.pool.acquire() as conn:
-        await conn.execute(
-            "ALTER TABLE sites DROP CONSTRAINT IF EXISTS sites_domain_key"
+        if db.is_sqlite:
+            await conn.execute("DROP INDEX IF EXISTS sites_domain_key")
+            await conn.execute(
+                """
+                INSERT INTO sites (url, status, domain)
+                VALUES ($1, 'completed', 'bfmtv.com'),
+                       ($2, 'completed', 'bfmtv.com')
+                """,
+                "https://www.bfmtv.com/",
+                "https://bfmtv.com/actu",
+            )
+        else:
+            await conn.execute(
+                "ALTER TABLE sites DROP CONSTRAINT IF EXISTS sites_domain_key"
+            )
+            await conn.execute(
+                """
+                INSERT INTO sites (url, status, domain)
+                VALUES
+                    ($1, 'completed', 'bfmtv.com'),
+                    ($2, 'completed', 'bfmtv.com')
+                """,
+                "https://www.bfmtv.com/",
+                "https://bfmtv.com/actu",
+            )
+        rows = await conn.fetch(
+            "SELECT id FROM sites WHERE domain = 'bfmtv.com' ORDER BY id"
         )
+        assert len(rows) == 2
         await conn.execute(
             """
-            INSERT INTO sites (url, status, domain, rss_feeds)
-            VALUES
-                ($1, 'completed', 'bfmtv.com', $2::jsonb),
-                ($3, 'completed', 'bfmtv.com', $4::jsonb)
+            INSERT INTO rss_feeds (site_id, url, title, feed_type)
+            VALUES ($1, $2, 'A', 'rss'), ($3, $4, 'B', 'rss')
             """,
-            "https://www.bfmtv.com/",
-            json.dumps([{"url": "https://bfmtv.com/feed-a", "title": "A"}]),
-            "https://bfmtv.com/actu",
-            json.dumps([{"url": "https://bfmtv.com/feed-b", "title": "B"}]),
+            rows[0]["id"],
+            "https://bfmtv.com/feed-a",
+            rows[1]["id"],
+            "https://bfmtv.com/feed-b",
         )
 
     deleted = await db.ensure_site_domain_unique()

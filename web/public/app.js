@@ -12,8 +12,31 @@ class StreamNewsApp {
 
     init() {
         this.setupEventListeners();
+        this.setupImageFallbacks();
         this.loadSites();
         this.connectWebSocket();
+    }
+
+    setupImageFallbacks() {
+        // Pas de onerror= inline (CSP script-src-attr 'none' via Helmet)
+        document.addEventListener('error', (e) => {
+            const img = e.target;
+            if (!(img instanceof HTMLImageElement)) return;
+            if (img.classList.contains('js-hide-on-error')) {
+                img.style.display = 'none';
+            }
+            if (img.classList.contains('js-hide-parent-on-error')) {
+                const parent = img.parentElement;
+                if (parent) parent.style.display = 'none';
+            }
+            if (img.classList.contains('article-item-thumb') || img.classList.contains('article-item-hero-img')) {
+                const hero = img.closest('.article-item-hero');
+                if (hero) hero.remove();
+                else img.remove();
+                const item = img.closest('.article-item');
+                if (item) item.classList.add('article-item--no-thumb');
+            }
+        }, true);
     }
 
     setupEventListeners() {
@@ -97,6 +120,9 @@ class StreamNewsApp {
                 break;
             case 'article_enriched':
                 this.handleArticleEnriched(data);
+                break;
+            case 'article_analyzed':
+                this.handleArticleAnalyzed(data);
                 break;
             case 'analysis_cancelled':
                 this.handleAnalysisCancelled(data);
@@ -321,7 +347,7 @@ class StreamNewsApp {
                     const feeds = this.parseRssFeeds(site.rss_feeds);
                     const title = site.site_title || site.url;
                     const favicon = site.favicon_url
-                        ? `<img class="site-favicon" src="${this.escapeAttr(site.favicon_url)}" alt="" width="20" height="20" loading="lazy" onerror="this.style.display='none'">`
+                        ? `<img class="site-favicon js-hide-on-error" src="${this.escapeAttr(site.favicon_url)}" alt="" width="20" height="20" loading="lazy">`
                         : `<span class="site-favicon site-favicon-fallback" aria-hidden="true"></span>`;
                     const desc = site.meta_description
                         ? `<div class="site-desc">${this.escapeHtml(site.meta_description.slice(0, 140))}${site.meta_description.length > 140 ? '…' : ''}</div>`
@@ -379,7 +405,7 @@ class StreamNewsApp {
             const resultsDiv = document.getElementById('results');
             const extra = site.meta_extra && typeof site.meta_extra === 'object' ? site.meta_extra : {};
             const favicon = site.favicon_url
-                ? `<img class="site-favicon site-favicon-lg" src="${this.escapeAttr(site.favicon_url)}" alt="" width="32" height="32" onerror="this.style.display='none'">`
+                ? `<img class="site-favicon site-favicon-lg js-hide-on-error" src="${this.escapeAttr(site.favicon_url)}" alt="" width="32" height="32">`
                 : '';
             resultsDiv.innerHTML = `
                 <h3>Détails de l'analyse</h3>
@@ -392,7 +418,7 @@ class StreamNewsApp {
                         </div>
                     </div>
                     ${site.meta_description ? `<p>${this.escapeHtml(site.meta_description)}</p>` : ''}
-                    ${extra.og_image ? `<p><img src="${this.escapeAttr(extra.og_image)}" alt="" style="max-width:100%;max-height:160px;border-radius:8px" onerror="this.style.display='none'"></p>` : ''}
+                    ${extra.og_image ? `<p><img class="js-hide-on-error" src="${this.escapeAttr(extra.og_image)}" alt="" style="max-width:100%;max-height:160px;border-radius:8px"></p>` : ''}
                     <p><strong>Statut:</strong> <span class="status ${site.status}">${this.getStatusText(site.status)}</span></p>
                     <p><strong>Pages analysées:</strong> ${site.total_pages_analyzed || 0}</p>
                     <p><strong>Date:</strong> ${new Date(site.created_at).toLocaleString()}</p>
@@ -421,6 +447,9 @@ class StreamNewsApp {
                         ${articles.length > 0 ? `
                             <button type="button" class="btn" data-enrich-site="${siteId}" style="width:auto;padding:10px 16px;font-size:14px;background:linear-gradient(135deg,#2c7a7b 0%,#285e61 100%)">
                                 Enrichir les articles
+                            </button>
+                            <button type="button" class="btn" data-analyze-site="${siteId}" style="width:auto;padding:10px 16px;font-size:14px;background:linear-gradient(135deg,#4c51bf 0%,#553c9a 100%)">
+                                Analyser le texte
                             </button>
                         ` : ''}
                     </p>
@@ -478,6 +507,26 @@ class StreamNewsApp {
                 });
             }
 
+            const analyzeSiteBtn = resultsDiv.querySelector('[data-analyze-site]');
+            if (analyzeSiteBtn) {
+                analyzeSiteBtn.addEventListener('click', async () => {
+                    analyzeSiteBtn.disabled = true;
+                    analyzeSiteBtn.textContent = 'Analyse lancée…';
+                    try {
+                        const res = await fetch(`/api/sites/${siteId}/analyze-articles?limit=50`, { method: 'POST' });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.error || 'Erreur analyse');
+                        this.updateStatus('Analyse texte en file (les articles se mettront a jour)', 'success');
+                        analyzeSiteBtn.textContent = 'Analyser le texte';
+                        analyzeSiteBtn.disabled = false;
+                    } catch (err) {
+                        this.updateStatus(`Erreur: ${err.message}`, 'error');
+                        analyzeSiteBtn.disabled = false;
+                        analyzeSiteBtn.textContent = 'Analyser le texte';
+                    }
+                });
+            }
+
             const deleteDetailBtn = resultsDiv.querySelector('[data-delete-site-detail]');
             if (deleteDetailBtn) {
                 deleteDetailBtn.addEventListener('click', () => this.deleteSite(siteId));
@@ -496,19 +545,408 @@ class StreamNewsApp {
         }
     }
 
+    articleMeta(article) {
+        const meta = article?.article_meta;
+        return meta && typeof meta === 'object' ? meta : {};
+    }
+
+    resolveImageUrl(url, baseLink = '') {
+        const raw = String(url || '').trim();
+        if (!raw) return null;
+        try {
+            if (raw.startsWith('//')) return `https:${raw}`;
+            if (/^https?:\/\//i.test(raw)) return raw;
+            if (baseLink) return new URL(raw, baseLink).href;
+            return raw;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    firstSrcsetUrl(srcset) {
+        if (!srcset) return '';
+        const first = String(srcset).split(',')[0] || '';
+        return first.trim().split(/\s+/)[0] || '';
+    }
+
+    imageUrlFromElement(img, baseLink = '') {
+        if (!img) return null;
+        const src = (img.getAttribute('src') || '').trim();
+        const dataSrc = (img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || '').trim();
+        const srcset = this.firstSrcsetUrl(img.getAttribute('srcset'));
+        let raw = src;
+        if (!raw || raw.startsWith('data:') || /placeholder|1x1|spacer/i.test(raw)) {
+            raw = dataSrc || srcset || src;
+        }
+        if (!raw) raw = dataSrc || srcset;
+        return this.resolveImageUrl(raw, baseLink);
+    }
+
+    normalizeImageUrl(url, baseLink = '') {
+        const resolved = this.resolveImageUrl(url, baseLink);
+        if (!resolved) return '';
+        try {
+            const u = new URL(resolved);
+            return `${u.origin}${u.pathname}`.replace(/\/+$/, '').toLowerCase();
+        } catch (_) {
+            return resolved.toLowerCase();
+        }
+    }
+
+    imageBasename(url, baseLink = '') {
+        const norm = this.normalizeImageUrl(url, baseLink);
+        if (!norm) return '';
+        try {
+            return decodeURIComponent(new URL(norm).pathname.split('/').pop() || '').toLowerCase();
+        } catch (_) {
+            return norm.split('/').pop()?.toLowerCase() || '';
+        }
+    }
+
+    imageStem(url, baseLink = '') {
+        const base = this.imageBasename(url, baseLink);
+        if (!base) return '';
+        return base
+            .replace(/\.[a-z0-9]{2,5}$/i, '')
+            .replace(/-\d+x\d+$/i, '');
+    }
+
+    imagesMatch(a, b, baseLink = '') {
+        if (!a || !b) return false;
+        if (this.normalizeImageUrl(a, baseLink) === this.normalizeImageUrl(b, baseLink)) return true;
+        const fa = this.imageBasename(a, baseLink);
+        const fb = this.imageBasename(b, baseLink);
+        if (fa && fb && fa === fb) return true;
+        // WordPress : photo.jpg vs photo-300x200.jpg
+        const sa = this.imageStem(a, baseLink);
+        const sb = this.imageStem(b, baseLink);
+        return Boolean(sa && sb && sa === sb && sa.length > 4);
+    }
+
+    collectInlineImages(article) {
+        const base = article?.link || '';
+        return [
+            ...this.extractImagesFromHtml(article?.content_html, base),
+            ...this.extractImagesFromHtml(article?.summary, base),
+        ];
+    }
+
+    pickArticleHero(article) {
+        const base = article?.link || '';
+        const meta = this.articleMeta(article);
+        const inlineImgs = this.collectInlineImages(article);
+
+        const flagged = (Array.isArray(article?.images) ? article.images : [])
+            .find((img) => img && img.primary && img.url);
+        if (flagged?.url) {
+            const url = this.resolveImageUrl(flagged.url, base);
+            if (url) {
+                return { url, alt: flagged.alt || '', source: flagged.source || 'primary' };
+            }
+        }
+
+        if (meta.primary_image) {
+            const url = this.resolveImageUrl(meta.primary_image, base);
+            if (url) {
+                const better = inlineImgs.find((b) => this.imagesMatch(b.url, url, base));
+                return {
+                    url: better?.url || url,
+                    alt: better?.alt || '',
+                    source: 'primary',
+                };
+            }
+        }
+
+        let metaHero = null;
+        for (const img of (Array.isArray(article?.images) ? article.images : [])) {
+            if (img && typeof img === 'object' && img.url) {
+                const url = this.resolveImageUrl(img.url, base);
+                if (url) {
+                    metaHero = { url, alt: img.alt || '', source: img.source || 'meta' };
+                    break;
+                }
+            }
+        }
+
+        if (!metaHero) {
+            const meta = this.articleMeta(article);
+            for (const img of (Array.isArray(meta.images) ? meta.images : [])) {
+                const raw = typeof img === 'string' ? img : img?.url;
+                const url = this.resolveImageUrl(raw, base);
+                if (url) {
+                    metaHero = { url, alt: '', source: 'meta' };
+                    break;
+                }
+            }
+        }
+
+        if (metaHero) {
+            const better = inlineImgs.find((b) => this.imagesMatch(b.url, metaHero.url, base));
+            if (better) {
+                return { ...metaHero, url: better.url, alt: better.alt || metaHero.alt };
+            }
+            return metaHero;
+        }
+
+        if (inlineImgs.length) {
+            return { ...inlineImgs[0], source: inlineImgs[0].source || 'html' };
+        }
+
+        return null;
+    }
+
+    renderHeroImg(hero, { wrapperClass = 'reader-hero', imgClass = '' } = {}) {
+        if (!hero?.url) return '';
+        const cls = imgClass ? ` class="${this.escapeAttr(imgClass)}"` : '';
+        return `<div class="${this.escapeAttr(wrapperClass)}"><img${cls} src="${this.escapeAttr(hero.url)}" alt="${this.escapeAttr(hero.alt || '')}" loading="lazy" decoding="async" referrerpolicy="no-referrer"></div>`;
+    }
+
+    articleImages(article, hero = null) {
+        const out = [];
+        const seen = new Set();
+        const base = article?.link || '';
+
+        const add = (url, alt = '', source = '') => {
+            const clean = this.resolveImageUrl(url, base);
+            if (!clean) return;
+            const key = this.normalizeImageUrl(clean, base);
+            if (seen.has(key)) return;
+            if (hero && this.imagesMatch(clean, hero.url, base)) return;
+            seen.add(key);
+            out.push({ url: clean, alt: (alt || '').slice(0, 300), source });
+        };
+
+        for (const img of this.extractImagesFromHtml(article?.content_html, base)) {
+            add(img.url, img.alt, img.source);
+        }
+
+        for (const img of (Array.isArray(article?.images) ? article.images : [])) {
+            if (img && typeof img === 'object') add(img.url, img.alt, img.source);
+            else if (typeof img === 'string') add(img);
+        }
+
+        const meta = this.articleMeta(article);
+        for (const img of (Array.isArray(meta.images) ? meta.images : [])) {
+            if (typeof img === 'string') add(img, '', 'meta');
+            else if (img && typeof img === 'object') add(img.url, img.alt, img.source || 'meta');
+        }
+
+        for (const img of this.extractImagesFromHtml(article?.summary, base)) {
+            add(img.url, img.alt, img.source);
+        }
+
+        return out;
+    }
+
+    extractImagesFromHtml(html, baseLink = '') {
+        if (!html || !/<img/i.test(String(html))) return [];
+        const tmp = document.createElement('div');
+        tmp.innerHTML = String(html);
+        const imgs = [];
+        tmp.querySelectorAll('img').forEach((img) => {
+            const url = this.imageUrlFromElement(img, baseLink);
+            if (!url) return;
+            imgs.push({
+                url,
+                alt: img.getAttribute('alt') || '',
+                source: 'html',
+            });
+        });
+        return imgs;
+    }
+
+    stripHeroImagesFromHtml(html, hero, article) {
+        if (!html) return html || '';
+        const base = article?.link || '';
+        const refs = [];
+        if (hero?.url) refs.push(hero.url);
+        for (const img of (Array.isArray(article?.images) ? article.images : [])) {
+            const u = this.resolveImageUrl(img?.url, base);
+            if (u) refs.push(u);
+        }
+        const heroStem = hero ? this.imageStem(hero.url, base) : '';
+
+        const tmp = document.createElement('div');
+        tmp.innerHTML = String(html);
+
+        tmp.querySelectorAll('img').forEach((img) => {
+            const src = this.imageUrlFromElement(img, base);
+            let strip = refs.some((ref) => this.imagesMatch(src, ref, base));
+            if (!strip && heroStem && this.imageStem(src, base) === heroStem) strip = true;
+
+            if (!strip) return;
+
+            const figure = img.closest('figure, picture');
+            if (figure) {
+                figure.remove();
+                return;
+            }
+            const p = img.closest('p');
+            if (p) {
+                const clone = p.cloneNode(true);
+                clone.querySelectorAll('img').forEach((node) => node.remove());
+                if (!clone.textContent.trim()) p.remove();
+                else img.remove();
+            } else {
+                img.remove();
+            }
+        });
+
+        return tmp.innerHTML;
+    }
+
+    prepareArticleBodyHtml(article, hero) {
+        if (!article?.content_html) return '';
+        if (!hero) return article.content_html;
+        return this.stripHeroImagesFromHtml(article.content_html, hero, article);
+    }
+
+    splitSummaryParts(text) {
+        return String(text || '')
+            .split(/\n+|(?<=[.!?…])\s+/)
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
+    }
+
+    formatSummaryParagraphs(sumyBlock) {
+        const sentences = Array.isArray(sumyBlock?.sentences)
+            ? sumyBlock.sentences.filter(Boolean)
+            : [];
+        let parts = sentences.map((s) => String(s).trim()).filter(Boolean);
+        if (!parts.length && sumyBlock?.summary) {
+            parts = this.splitSummaryParts(sumyBlock.summary);
+            if (parts.length <= 1 && String(sumyBlock.summary).length > 160) {
+                parts = String(sumyBlock.summary)
+                    .split(/(?<=[;])\s+/)
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+            }
+        }
+        if (!parts.length) return '';
+        return `<div class="reader-analysis-summary">${parts.map((part) =>
+            `<p>${this.escapeHtml(part)}</p>`
+        ).join('')}</div>`;
+    }
+
+    articleHero(article) {
+        return this.pickArticleHero(article);
+    }
+
+    articleDomain(article) {
+        const meta = this.articleMeta(article);
+        if (meta.domain) return meta.domain;
+        try {
+            return new URL(article.link).hostname.replace(/^www\./, '');
+        } catch (_) {
+            return '';
+        }
+    }
+
+    articleChapo(article) {
+        const meta = this.articleMeta(article);
+        return meta.description || this.stripHtml(article.summary || '');
+    }
+
+    enrichStatusLabel(status) {
+        const map = {
+            ok: 'enrichi',
+            pending: 'en cours',
+            error: 'erreur',
+        };
+        return map[status] || status || '';
+    }
+
+    analysisStatusLabel(status) {
+        const map = {
+            ok: 'analysé',
+            pending: 'analyse…',
+            error: 'erreur NLP',
+            skipped: 'non analysé',
+        };
+        return map[status] || status || '';
+    }
+
+    langLabel(code) {
+        const map = {
+            fr: 'Français',
+            en: 'Anglais',
+            de: 'Allemand',
+            es: 'Espagnol',
+            it: 'Italien',
+            pt: 'Portugais',
+            nl: 'Néerlandais',
+        };
+        return map[code] || code?.toUpperCase() || '';
+    }
+
+    entityClass(label) {
+        const l = String(label || '').toUpperCase();
+        if (l === 'ORG' || l === 'ORGANIZATION') return 'reader-entity-org';
+        if (l === 'PER' || l === 'PERSON') return 'reader-entity-per';
+        if (l === 'LOC' || l === 'GPE' || l === 'LOCATION') return 'reader-entity-loc';
+        return 'reader-entity-misc';
+    }
+
+    entityLabelFr(label) {
+        const map = {
+            ORG: 'org',
+            PER: 'pers',
+            PERSON: 'pers',
+            LOC: 'lieu',
+            GPE: 'lieu',
+            MISC: 'autre',
+            DATE: 'date',
+            MONEY: 'montant',
+        };
+        return map[String(label || '').toUpperCase()] || String(label || '').toLowerCase();
+    }
+
+    articleAnalysisStatus(article) {
+        return this.articleMeta(article).analysis_status || '';
+    }
+
+    articleAnalysisBlocks(article) {
+        const analysis = this.articleMeta(article).analysis;
+        return analysis && typeof analysis === 'object' ? analysis : {};
+    }
+
+    formatReadingTime(meta) {
+        const mins = meta?.reading_time_minutes;
+        if (!mins) return '';
+        return mins === 1 ? '1 min de lecture' : `${mins} min de lecture`;
+    }
+
     renderArticleListItem(article) {
         const status = article.enrich_status || '';
         const badge = status
-            ? `<span class="article-enrich-badge ${this.escapeAttr(status)}">${this.escapeHtml(status)}</span>`
+            ? `<span class="article-enrich-badge ${this.escapeAttr(status)}">${this.escapeHtml(this.enrichStatusLabel(status))}</span>`
+            : '';
+        const analysisStatus = this.articleAnalysisStatus(article);
+        const analysisBadge = analysisStatus
+            ? `<span class="article-analysis-badge ${this.escapeAttr(analysisStatus)}">${this.escapeHtml(this.analysisStatusLabel(analysisStatus))}</span>`
             : '';
         const selected = this.selectedArticleId === article.id ? ' is-selected' : '';
+        const hero = this.articleHero(article);
+        const heroBlock = hero
+            ? this.renderHeroImg(hero, { wrapperClass: 'article-item-hero', imgClass: 'article-item-hero-img' })
+            : '';
+        const noThumbClass = hero ? '' : ' article-item--no-thumb';
+        const domain = this.articleDomain(article);
+        const chapo = this.articleChapo(article);
+        const dateStr = article.published_at
+            ? new Date(article.published_at).toLocaleDateString()
+            : 'Date inconnue';
+
         return `
-            <div class="rss-feed article-item${selected}" data-article-id="${article.id}">
-                <h4>${this.escapeHtml(article.title || 'Sans titre')}${badge}</h4>
-                ${article.summary ? `<p>${this.escapeHtml(this.stripHtml(article.summary).slice(0, 160))}${this.stripHtml(article.summary).length > 160 ? '…' : ''}</p>` : ''}
-                <small>
-                    ${article.published_at ? this.escapeHtml(new Date(article.published_at).toLocaleString()) : 'Date inconnue'}
-                </small>
+            <div class="rss-feed article-item${selected}${noThumbClass}" data-article-id="${article.id}">
+                <div class="article-item-body">
+                    <h4>${this.escapeHtml(article.title || 'Sans titre')}${badge}${analysisBadge}</h4>
+                    ${heroBlock}
+                    ${chapo ? `<p>${this.escapeHtml(chapo.slice(0, 140))}${chapo.length > 140 ? '…' : ''}</p>` : ''}
+                    <small class="article-item-meta">
+                        ${domain ? `${this.escapeHtml(domain)} · ` : ''}${this.escapeHtml(dateStr)}
+                    </small>
+                </div>
             </div>
         `;
     }
@@ -517,6 +955,13 @@ class StreamNewsApp {
         if (this._articlePollTimer) {
             clearInterval(this._articlePollTimer);
             this._articlePollTimer = null;
+        }
+    }
+
+    _clearAnalysisPoll() {
+        if (this._analysisPollTimer) {
+            clearInterval(this._analysisPollTimer);
+            this._analysisPollTimer = null;
         }
     }
 
@@ -549,8 +994,29 @@ class StreamNewsApp {
             }
 
             this.renderArticleReader(article, { loading: false });
+            await this._maybeStartAnalysis(articleId, article);
         } catch (err) {
             reader.innerHTML = `<p class="reader-meta">Erreur: ${this.escapeHtml(err.message)}</p>`;
+        }
+    }
+
+    async _maybeStartAnalysis(articleId, article) {
+        if (article.enrich_status !== 'ok') return;
+        const meta = this.articleMeta(article);
+        const status = meta.analysis_status;
+        if (status === 'ok' || status === 'pending') {
+            if (status === 'pending') {
+                this.renderArticleReader(article, { loadingAnalysis: true });
+                this._pollAnalysisUntilDone(articleId);
+            }
+            return;
+        }
+        try {
+            await fetch(`/api/articles/${articleId}/analyze`, { method: 'POST' });
+            this.renderArticleReader(article, { loadingAnalysis: true });
+            this._pollAnalysisUntilDone(articleId);
+        } catch (_) {
+            /* analyse optionnelle */
         }
     }
 
@@ -578,11 +1044,50 @@ class StreamNewsApp {
                     this._clearArticlePoll();
                     this.renderArticleReader(article, { loading: false });
                     this._updateArticleBadge(articleId, article.enrich_status);
+                    if (article.enrich_status === 'ok') {
+                        await this._maybeStartAnalysis(articleId, article);
+                    }
                 }
             } catch (_) {
                 /* ignore transient */
             }
         }, 1500);
+    }
+
+    _pollAnalysisUntilDone(articleId) {
+        this._clearAnalysisPoll();
+        let tries = 0;
+        this._analysisPollTimer = setInterval(async () => {
+            tries += 1;
+            if (this.selectedArticleId !== articleId || tries > 40) {
+                this._clearAnalysisPoll();
+                return;
+            }
+            try {
+                const article = await this.fetchArticle(articleId);
+                const status = this.articleAnalysisStatus(article);
+                if (status === 'ok' || status === 'error' || status === 'skipped') {
+                    this._clearAnalysisPoll();
+                    this.renderArticleReader(article, { loading: false, loadingAnalysis: false });
+                    this._updateAnalysisBadge(articleId, status);
+                }
+            } catch (_) {
+                /* ignore transient */
+            }
+        }, 1500);
+    }
+
+    _updateAnalysisBadge(articleId, status) {
+        const el = document.querySelector(`.article-item[data-article-id="${articleId}"] h4`);
+        if (!el) return;
+        let badge = el.querySelector('.article-analysis-badge');
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'article-analysis-badge';
+            el.appendChild(badge);
+        }
+        badge.className = `article-analysis-badge ${status || ''}`;
+        badge.textContent = this.analysisStatusLabel(status);
     }
 
     _updateArticleBadge(articleId, status) {
@@ -595,64 +1100,228 @@ class StreamNewsApp {
             el.appendChild(badge);
         }
         badge.className = `article-enrich-badge ${status || ''}`;
-        badge.textContent = status || '';
+        badge.textContent = this.enrichStatusLabel(status);
     }
 
-    renderArticleReader(article, { loading } = {}) {
+    renderAnalysisPanel(article, { loadingAnalysis } = {}) {
+        if (article.enrich_status !== 'ok') return '';
+
+        const meta = this.articleMeta(article);
+        const analysisStatus = meta.analysis_status || '';
+        const blocks = this.articleAnalysisBlocks(article);
+        const reanalyzeBtn = `<button type="button" class="btn" data-reanalyze="${article.id}">Reanalyser</button>`;
+
+        if (loadingAnalysis || analysisStatus === 'pending') {
+            return `<section class="reader-analysis-section">
+                <span class="reader-section-label">Analyse</span>
+                <div class="reader-analysis-panel is-loading">
+                    <h4>
+                        <span class="reader-analysis-head">Analyse texte</span>
+                        <span class="reader-analysis-actions">${reanalyzeBtn}</span>
+                    </h4>
+                    <p class="reader-analysis-empty">Analyse en cours (langue, mots-cles, resume, entites)…</p>
+                </div>
+            </section>`;
+        }
+
+        const langBlock = blocks.lang_detect;
+        const yakeBlock = blocks.keywords_yake;
+        const sumyBlock = blocks.summary_sumy;
+        const nerBlock = blocks.ner_spacy;
+        const simBlock = blocks.simhash;
+
+        const hasLang = langBlock?.status === 'ok' && langBlock.lang;
+        const yakeKws = yakeBlock?.status === 'ok' && Array.isArray(yakeBlock.keywords)
+            ? yakeBlock.keywords : [];
+        const summaryHtml = sumyBlock?.status === 'ok' ? this.formatSummaryParagraphs(sumyBlock) : '';
+        const entities = nerBlock?.status === 'ok' && Array.isArray(nerBlock.entities)
+            ? nerBlock.entities : [];
+        const simhash = simBlock?.status === 'ok' ? (simBlock.hex || simBlock.value) : '';
+
+        const hasContent = hasLang || yakeKws.length || summaryHtml || entities.length || simhash;
+
+        if (!hasContent) {
+            const err = meta.analysis_error;
+            const emptyMsg = analysisStatus === 'error'
+                ? `Analyse echouee${err ? ` : ${err}` : ''}`
+                : 'Pas encore analyse.';
+            return `<section class="reader-analysis-section">
+                <span class="reader-section-label">Analyse</span>
+                <div class="reader-analysis-panel">
+                    <h4>
+                        <span class="reader-analysis-head">Analyse texte</span>
+                        <span class="reader-analysis-actions">${reanalyzeBtn}</span>
+                    </h4>
+                    <p class="reader-analysis-empty">${this.escapeHtml(emptyMsg)}</p>
+                </div>
+            </section>`;
+        }
+
+        const langBadge = hasLang
+            ? `<span class="reader-lang-badge" title="Confiance ${Math.round((langBlock.confidence || 0) * 100)}%">
+                ${this.escapeHtml(this.langLabel(langBlock.lang))}
+               </span>`
+            : '';
+
+        const summaryBlock = summaryHtml || '';
+
+        const yakeBlockHtml = yakeKws.length
+            ? `<div class="reader-analysis-keywords">${yakeKws.map((kw) =>
+                `<span class="reader-analysis-keyword">${this.escapeHtml(kw)}</span>`
+            ).join('')}</div>`
+            : '';
+
+        const entitiesBlock = entities.length
+            ? `<div class="reader-entities">${entities.map((ent) =>
+                `<span class="reader-entity ${this.entityClass(ent.label)}"
+                    data-label="${this.escapeAttr(this.entityLabelFr(ent.label))}">
+                    ${this.escapeHtml(ent.text)}
+                </span>`
+            ).join('')}</div>`
+            : '';
+
+        const footerBits = [];
+        if (simhash) footerBits.push(`Empreinte ${String(simhash).slice(0, 12)}…`);
+        if (meta.analyzed_at) {
+            footerBits.push(`Analyse ${new Date(meta.analyzed_at).toLocaleString()}`);
+        }
+        const footer = footerBits.length
+            ? `<div class="reader-analysis-meta">${footerBits.map((b) => this.escapeHtml(b)).join(' · ')}</div>`
+            : '';
+
+        let sections = '';
+        if (summaryBlock) sections += `<div class="reader-analysis-block"><strong>Resume</strong>${summaryBlock}</div>`;
+        if (yakeBlockHtml) sections += `<div class="reader-analysis-block"><strong>Mots-cles</strong>${yakeBlockHtml}</div>`;
+        if (entitiesBlock) sections += `<div class="reader-analysis-block"><strong>Entites</strong>${entitiesBlock}</div>`;
+
+        return `<section class="reader-analysis-section">
+            <span class="reader-section-label">Analyse</span>
+            <div class="reader-analysis-panel">
+                <h4>
+                    <span class="reader-analysis-head">Synthese ${langBadge}</span>
+                    <span class="reader-analysis-actions">${reanalyzeBtn}</span>
+                </h4>
+                ${sections}
+                ${footer}
+            </div>
+        </section>`;
+    }
+
+    renderArticleReader(article, { loading, loadingAnalysis } = {}) {
         const reader = document.getElementById('articleReader');
         if (!reader || this.selectedArticleId !== article.id) return;
         reader.classList.remove('empty');
 
-        const meta = article.article_meta && typeof article.article_meta === 'object'
-            ? article.article_meta
-            : {};
+        // Ne pas afficher "enrichissement..." si deja enrichi (race WS / poll)
+        if (loading && article.enrich_status === 'ok') loading = false;
+
+        const meta = this.articleMeta(article);
+        const hero = this.pickArticleHero(article);
+        const gallery = this.articleImages(article, hero);
         const author = article.author || meta.author || '';
         const published = article.published_at
             ? new Date(article.published_at).toLocaleString()
             : (meta.date_published || '');
-        const images = Array.isArray(article.images) ? article.images : [];
-        const heroImages = images.slice(0, 4);
+        const chapo = this.articleChapo(article);
+        const domain = this.articleDomain(article);
+        const reading = this.formatReadingTime(meta);
+        const keywords = Array.isArray(meta.keywords) ? meta.keywords : [];
+        const status = article.enrich_status || '';
+        const statusBadge = status
+            ? `<span class="article-enrich-badge ${this.escapeAttr(status)}">${this.escapeHtml(this.enrichStatusLabel(status))}</span>`
+            : '';
+        const analysisStatus = meta.analysis_status || '';
+        const analysisBadge = analysisStatus
+            ? `<span class="article-analysis-badge ${this.escapeAttr(analysisStatus)}">${this.escapeHtml(this.analysisStatusLabel(analysisStatus))}</span>`
+            : '';
+        const typeBadge = meta.schema_type || meta.og_type
+            ? `<span class="reader-type-badge">${this.escapeHtml(meta.schema_type || meta.og_type)}</span>`
+            : '';
 
         let bodyHtml = '';
         if (loading) {
             bodyHtml = `<p class="reader-meta">Enrichissement en cours (fetch de la page)…</p>
-                ${article.summary ? `<div class="reader-body"><p>${this.escapeHtml(this.stripHtml(article.summary))}</p></div>` : ''}`;
+                ${chapo ? `<p class="reader-chapo">${this.escapeHtml(chapo)}</p>` : ''}`;
         } else if (article.enrich_status === 'error') {
             bodyHtml = `<p class="reader-meta">Enrichissement echoue: ${this.escapeHtml(article.enrich_error || 'erreur')}</p>
-                ${article.summary ? `<div class="reader-body"><p>${this.escapeHtml(this.stripHtml(article.summary))}</p></div>` : ''}`;
+                ${chapo ? `<p class="reader-chapo">${this.escapeHtml(chapo)}</p>` : ''}`;
         } else if (article.content_html) {
-            bodyHtml = `<div class="reader-body">${article.content_html}</div>`;
+            const cleanedHtml = this.prepareArticleBodyHtml(article, hero);
+            bodyHtml = `<div class="reader-body">${cleanedHtml}</div>`;
         } else if (article.content_text) {
             bodyHtml = `<div class="reader-body"><p>${this.escapeHtml(article.content_text).replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>')}</p></div>`;
-        } else if (article.summary) {
-            bodyHtml = `<div class="reader-body"><p>${this.escapeHtml(this.stripHtml(article.summary))}</p></div>`;
+        } else if (chapo) {
+            bodyHtml = `<p class="reader-chapo">${this.escapeHtml(chapo)}</p>`;
         } else {
             bodyHtml = `<p class="reader-meta">Pas de contenu disponible</p>`;
         }
 
-        const sources = Array.isArray(meta.sources) ? meta.sources.join(', ') : '';
+        const chapoBlock = (!loading && article.enrich_status !== 'error' && chapo && article.content_html)
+            ? `<p class="reader-chapo">${this.escapeHtml(chapo)}</p>`
+            : '';
+
+        const keywordsBlock = keywords.length
+            ? `<div class="reader-keywords">${keywords.map((kw) =>
+                `<span class="reader-keyword">${this.escapeHtml(kw)}</span>`).join('')}</div>`
+            : '';
+
+        const galleryBlock = gallery.length
+            ? `<div class="reader-gallery">${gallery.map((img) =>
+                `<img class="js-hide-on-error" src="${this.escapeAttr(img.url)}" alt="${this.escapeAttr(img.alt || '')}" loading="lazy" title="${this.escapeAttr(img.source || '')}">`
+            ).join('')}</div>`
+            : '';
+
+        const metaRows = [
+            ['Sources', (meta.sources || []).join(', ')],
+            ['Flux RSS', article.feed_url],
+            ['Schema', meta.schema_type],
+            ['OG type', meta.og_type],
+            ['Domaine', meta.domain || domain],
+            ['Canonique', meta.canonical_url],
+            ['Modifie', meta.date_modified],
+            ['Enrichi', article.enriched_at ? new Date(article.enriched_at).toLocaleString() : ''],
+            ['Images', `${(hero ? 1 : 0) + gallery.length}${hero ? ` (hero + ${gallery.length} galerie)` : ''}`],
+        ].filter(([, val]) => val);
+
+        const metaPanel = metaRows.length
+            ? `<details class="reader-meta-panel">
+                <summary>Metadonnees techniques</summary>
+                <dl>${metaRows.map(([label, val]) =>
+                    `<dt>${this.escapeHtml(label)}</dt><dd>${this.escapeHtml(String(val))}</dd>`
+                ).join('')}</dl>
+               </details>`
+            : '';
+
+        const analysisPanel = this.renderAnalysisPanel(article, { loadingAnalysis });
+        const heroBlock = this.renderHeroImg(hero);
 
         reader.innerHTML = `
-            <h3>${this.escapeHtml(article.title || 'Sans titre')}</h3>
-            <div class="reader-meta">
-                ${published ? this.escapeHtml(published) : ''}
-                ${author ? ` · ${this.escapeHtml(author)}` : ''}
-                ${sources ? ` · meta: ${this.escapeHtml(sources)}` : ''}
-            </div>
-            ${heroImages.length ? `
-                <div class="reader-images">
-                    ${heroImages.map(img => `
-                        <img src="${this.escapeAttr(img.url)}" alt="${this.escapeAttr(img.alt || '')}" loading="lazy" onerror="this.style.display='none'">
-                    `).join('')}
+            <div class="reader-badge-row">${statusBadge}${analysisBadge}${typeBadge}</div>
+            <header class="reader-header">
+                <h3>${this.escapeHtml(article.title || 'Sans titre')}</h3>
+                <div class="reader-meta">
+                    ${published ? this.escapeHtml(published) : ''}
+                    ${author ? ` · ${this.escapeHtml(author)}` : ''}
+                    ${domain ? ` · ${this.escapeHtml(domain)}` : ''}
+                    ${reading ? ` · ${this.escapeHtml(reading)}` : ''}
                 </div>
-            ` : ''}
-            ${bodyHtml}
+                ${heroBlock}
+            </header>
+            ${analysisPanel}
+            <section class="reader-article-section">
+                <span class="reader-section-label">Article</span>
+                ${keywordsBlock}
+                ${chapoBlock}
+                ${bodyHtml}
+                ${galleryBlock}
+            </section>
             <div class="reader-actions">
                 <a href="${this.escapeAttr(article.link)}" target="_blank" rel="noopener noreferrer">Ouvrir l'original</a>
                 ${article.enrich_status === 'ok' ? `
                     · <button type="button" class="btn" data-reenrich="${article.id}" style="width:auto;padding:6px 12px;font-size:13px;display:inline-block">Relire la page</button>
                 ` : ''}
             </div>
+            ${metaPanel}
         `;
 
         const reBtn = reader.querySelector('[data-reenrich]');
@@ -668,6 +1337,21 @@ class StreamNewsApp {
                 }
             });
         }
+
+        const analyzeBtn = reader.querySelector('[data-reanalyze]');
+        if (analyzeBtn) {
+            analyzeBtn.addEventListener('click', async () => {
+                analyzeBtn.disabled = true;
+                try {
+                    await fetch(`/api/articles/${article.id}/analyze?force=1`, { method: 'POST' });
+                    this.renderArticleReader(article, { loadingAnalysis: true });
+                    this._pollAnalysisUntilDone(article.id);
+                } catch (err) {
+                    this.updateStatus(`Erreur: ${err.message}`, 'error');
+                    analyzeBtn.disabled = false;
+                }
+            });
+        }
     }
 
     handleArticleEnriched(data) {
@@ -676,7 +1360,23 @@ class StreamNewsApp {
         this._updateArticleBadge(articleId, data.status);
         if (this.selectedArticleId === articleId) {
             this.fetchArticle(articleId)
-                .then((article) => this.renderArticleReader(article, { loading: false }))
+                .then(async (article) => {
+                    this.renderArticleReader(article, { loading: false });
+                    if (data.status === 'ok') {
+                        await this._maybeStartAnalysis(articleId, article);
+                    }
+                })
+                .catch(() => {});
+        }
+    }
+
+    handleArticleAnalyzed(data) {
+        const articleId = Number(data.article_id);
+        if (!articleId) return;
+        this._updateAnalysisBadge(articleId, data.status);
+        if (this.selectedArticleId === articleId) {
+            this.fetchArticle(articleId)
+                .then((article) => this.renderArticleReader(article, { loading: false, loadingAnalysis: false }))
                 .catch(() => {});
         }
     }

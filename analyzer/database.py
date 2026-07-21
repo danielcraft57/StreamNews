@@ -18,6 +18,20 @@ class Database:
     def is_sqlite(self) -> bool:
         return self.backend == "sqlite"
 
+    async def close(self):
+        """Ferme le pool (obligatoire sous Celery + aiosqlite avant fin de event loop)."""
+        if self.pool is not None:
+            await self.pool.close()
+            self.pool = None
+
+    async def __aenter__(self):
+        await self.init_db()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.close()
+        return False
+
     @staticmethod
     def _parse_json_field(value: Any):
         """asyncpg renvoie souvent le JSONB en str : on normalise en objet Python."""
@@ -39,17 +53,13 @@ class Database:
 
     def _row_to_dict(self, row) -> Dict:
         data = dict(row)
-        if 'rss_feeds' in data:
-            data['rss_feeds'] = self._parse_json_field(data['rss_feeds'])
         if 'meta_extra' in data:
             raw = self._parse_json_field(data['meta_extra'])
             data['meta_extra'] = raw if isinstance(raw, dict) else {}
-        if 'images' in data:
-            raw = self._parse_json_field(data['images'])
-            data['images'] = raw if isinstance(raw, list) else []
-        if 'article_meta' in data:
-            raw = self._parse_json_field(data['article_meta'])
-            data['article_meta'] = raw if isinstance(raw, dict) else {}
+        # API shape : hydrate depuis tables normalisees (pas de blob JSON)
+        data.setdefault('images', [])
+        data.setdefault('article_meta', {})
+        data.setdefault('rss_feeds', [])
         # Dates asyncpg -> iso pour le front
         for key in (
             'created_at', 'updated_at', 'analyzed_at', 'published_at',
@@ -57,24 +67,78 @@ class Database:
         ):
             if key in data and data[key] is not None and hasattr(data[key], 'isoformat'):
                 data[key] = data[key].isoformat()
+        if data.get("analysis_status") and isinstance(data.get("article_meta"), dict):
+            data["article_meta"].setdefault("analysis_status", data["analysis_status"])
+            if data.get("analysis_error"):
+                data["article_meta"].setdefault("analysis_error", data["analysis_error"])
+            if data.get("analyzed_at"):
+                data["article_meta"].setdefault("analyzed_at", data["analyzed_at"])
         return data
 
-    async def init_db(self, reset: bool = False):
-        """Initialise la connexion et le schema (pas de migrations).
+    @staticmethod
+    def _merge_image_lists(existing: Any, new: Any, limit: int = 20) -> List[Dict]:
+        base = existing if isinstance(existing, list) else []
+        incoming = new if isinstance(new, list) else []
+        out: List[Dict] = []
+        seen = set()
+        for img in base + incoming:
+            if not isinstance(img, dict):
+                continue
+            url = img.get("url")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            out.append(img)
+            if len(out) >= limit:
+                break
+        return out
 
-        reset=True ou STREAMNEWS_RESET_DB=1 : DROP + recreate (pages/articles CASCADE).
+    @staticmethod
+    def _merge_article_meta_dict(existing: Any, new: Any) -> Dict[str, Any]:
+        base = existing if isinstance(existing, dict) else {}
+        incoming = new if isinstance(new, dict) else {}
+        out = dict(base)
+        for key, val in incoming.items():
+            if key == "sources":
+                srcs = list(out.get("sources") or [])
+                for src in val or []:
+                    if src and src not in srcs:
+                        srcs.append(src)
+                out["sources"] = srcs
+            elif key == "keywords":
+                kws = list(out.get("keywords") or [])
+                seen = {k.lower() for k in kws}
+                for kw in val or []:
+                    label = str(kw).strip()
+                    if label and label.lower() not in seen:
+                        seen.add(label.lower())
+                        kws.append(label)
+                out["keywords"] = kws[:30]
+            elif key == "analysis":
+                merged_analysis = dict(out.get("analysis") or {})
+                for tool_name, block in (val or {}).items():
+                    if isinstance(block, dict):
+                        merged_analysis[tool_name] = block
+                out["analysis"] = merged_analysis
+            elif key not in out or out.get(key) in (None, "", []):
+                out[key] = val
+        return out
+
+    async def init_db(self, reset: bool = False):
+        """Initialise la connexion, migrations Alembic et backfill dedupe.
+
+        reset=True ou STREAMNEWS_RESET_DB=1 : downgrade base + upgrade head.
         Backend : Postgres (prod) ou SQLite (local) selon DATABASE_URL.
         """
-        self.pool = await create_pool(self.database_url)
-        self.backend = getattr(self.pool, "backend", self.backend)
         do_reset = reset or os.getenv("STREAMNEWS_RESET_DB", "").strip() in ("1", "true", "yes")
 
-        if self.is_sqlite:
-            await self._init_schema_sqlite(do_reset)
-        else:
-            await self._init_schema_postgres(do_reset)
+        from migrate import run_migrations
 
-        # Backfill dedupe une seule fois par process (evite de rescanner a chaque tache)
+        run_migrations(self.database_url, reset=do_reset)
+
+        self.pool = await create_pool(self.database_url)
+        self.backend = getattr(self.pool, "backend", self.backend)
+
         if not getattr(self, "_dedupe_ensured", False):
             deleted = await self.ensure_article_dedupe()
             dup_sites = await self.ensure_site_domain_unique()
@@ -84,243 +148,6 @@ class Database:
                 logging.getLogger(__name__).info(
                     "Dedupe: %s articles, %s sites fusionnes", deleted, dup_sites
                 )
-
-    async def _init_schema_sqlite(self, do_reset: bool):
-        async with self.pool.acquire() as conn:
-            if do_reset:
-                await conn.execute("DROP TABLE IF EXISTS articles")
-                await conn.execute("DROP TABLE IF EXISTS pages")
-                await conn.execute("DROP TABLE IF EXISTS sites")
-
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS sites (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    url VARCHAR(500) NOT NULL,
-                    status VARCHAR(50) NOT NULL DEFAULT 'pending',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    total_pages_analyzed INTEGER DEFAULT 0,
-                    rss_feeds TEXT DEFAULT '[]',
-                    celery_task_id VARCHAR(255),
-                    site_title VARCHAR(500),
-                    favicon_url VARCHAR(1000),
-                    meta_description TEXT,
-                    meta_extra TEXT DEFAULT '{}',
-                    domain VARCHAR(255)
-                )
-            """)
-            for col_sql in (
-                "ALTER TABLE sites ADD COLUMN celery_task_id VARCHAR(255)",
-                "ALTER TABLE sites ADD COLUMN site_title VARCHAR(500)",
-                "ALTER TABLE sites ADD COLUMN favicon_url VARCHAR(1000)",
-                "ALTER TABLE sites ADD COLUMN meta_description TEXT",
-                "ALTER TABLE sites ADD COLUMN meta_extra TEXT DEFAULT '{}'",
-                "ALTER TABLE sites ADD COLUMN domain VARCHAR(255)",
-            ):
-                try:
-                    await conn.execute(col_sql)
-                except Exception:
-                    pass
-
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS pages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-                    url VARCHAR(1000) NOT NULL,
-                    title VARCHAR(500),
-                    rss_feeds TEXT DEFAULT '[]',
-                    analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS articles (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-                    feed_url VARCHAR(1000) NOT NULL,
-                    title VARCHAR(1000),
-                    link VARCHAR(2000) NOT NULL,
-                    summary TEXT,
-                    author VARCHAR(500),
-                    published_at TIMESTAMP,
-                    guid VARCHAR(2000),
-                    dedupe_key VARCHAR(2100) NOT NULL DEFAULT '',
-                    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    content_html TEXT,
-                    content_text TEXT,
-                    images TEXT DEFAULT '[]',
-                    article_meta TEXT DEFAULT '{}',
-                    enriched_at TIMESTAMP,
-                    enrich_status VARCHAR(50),
-                    enrich_error TEXT,
-                    UNIQUE (site_id, link)
-                )
-            """)
-            for col_sql in (
-                "ALTER TABLE articles ADD COLUMN dedupe_key VARCHAR(2100) NOT NULL DEFAULT ''",
-                "ALTER TABLE articles ADD COLUMN content_html TEXT",
-                "ALTER TABLE articles ADD COLUMN content_text TEXT",
-                "ALTER TABLE articles ADD COLUMN images TEXT DEFAULT '[]'",
-                "ALTER TABLE articles ADD COLUMN article_meta TEXT DEFAULT '{}'",
-                "ALTER TABLE articles ADD COLUMN enriched_at TIMESTAMP",
-                "ALTER TABLE articles ADD COLUMN enrich_status VARCHAR(50)",
-                "ALTER TABLE articles ADD COLUMN enrich_error TEXT",
-            ):
-                try:
-                    await conn.execute(col_sql)
-                except Exception:
-                    pass
-
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_articles_site_published
-                ON articles (site_id, published_at DESC)
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_articles_enrich_status
-                ON articles (site_id, enrich_status)
-            """)
-
-    async def _init_schema_postgres(self, do_reset: bool):
-        async with self.pool.acquire() as conn:
-            if do_reset:
-                await conn.execute("DROP TABLE IF EXISTS articles CASCADE")
-                await conn.execute("DROP TABLE IF EXISTS pages CASCADE")
-                await conn.execute("DROP TABLE IF EXISTS sites CASCADE")
-
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS sites (
-                    id SERIAL PRIMARY KEY,
-                    url VARCHAR(500) NOT NULL,
-                    status VARCHAR(50) NOT NULL DEFAULT 'pending',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    total_pages_analyzed INTEGER DEFAULT 0,
-                    rss_feeds JSONB DEFAULT '[]'::jsonb,
-                    celery_task_id VARCHAR(255),
-                    site_title VARCHAR(500),
-                    favicon_url VARCHAR(1000),
-                    meta_description TEXT,
-                    meta_extra JSONB DEFAULT '{}'::jsonb,
-                    domain VARCHAR(255)
-                )
-            """)
-            await conn.execute("""
-                ALTER TABLE sites
-                ADD COLUMN IF NOT EXISTS celery_task_id VARCHAR(255)
-            """)
-            await conn.execute("""
-                ALTER TABLE sites
-                ADD COLUMN IF NOT EXISTS site_title VARCHAR(500)
-            """)
-            await conn.execute("""
-                ALTER TABLE sites
-                ADD COLUMN IF NOT EXISTS favicon_url VARCHAR(1000)
-            """)
-            await conn.execute("""
-                ALTER TABLE sites
-                ADD COLUMN IF NOT EXISTS meta_description TEXT
-            """)
-            await conn.execute("""
-                ALTER TABLE sites
-                ADD COLUMN IF NOT EXISTS meta_extra JSONB DEFAULT '{}'::jsonb
-            """)
-            await conn.execute("""
-                ALTER TABLE sites
-                ADD COLUMN IF NOT EXISTS domain VARCHAR(255)
-            """)
-
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS pages (
-                    id SERIAL PRIMARY KEY,
-                    site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-                    url VARCHAR(1000) NOT NULL,
-                    title VARCHAR(500),
-                    rss_feeds JSONB DEFAULT '[]'::jsonb,
-                    analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS articles (
-                    id SERIAL PRIMARY KEY,
-                    site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-                    feed_url VARCHAR(1000) NOT NULL,
-                    title VARCHAR(1000),
-                    link VARCHAR(2000) NOT NULL,
-                    summary TEXT,
-                    author VARCHAR(500),
-                    published_at TIMESTAMP,
-                    guid VARCHAR(2000),
-                    dedupe_key VARCHAR(2100) NOT NULL DEFAULT '',
-                    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    content_html TEXT,
-                    content_text TEXT,
-                    images JSONB DEFAULT '[]'::jsonb,
-                    article_meta JSONB DEFAULT '{}'::jsonb,
-                    enriched_at TIMESTAMP,
-                    enrich_status VARCHAR(50),
-                    enrich_error TEXT,
-                    UNIQUE (site_id, link)
-                )
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS dedupe_key VARCHAR(2100) NOT NULL DEFAULT ''
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS content_html TEXT
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS content_text TEXT
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]'::jsonb
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS article_meta JSONB DEFAULT '{}'::jsonb
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMP
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS enrich_status VARCHAR(50)
-            """)
-            await conn.execute("""
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS enrich_error TEXT
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_articles_site_published
-                ON articles (site_id, published_at DESC NULLS LAST)
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_articles_enrich_status
-                ON articles (site_id, enrich_status)
-            """)
-
-            # Installs existantes : forcer ON DELETE CASCADE sans migration
-            await conn.execute("""
-                DO $$
-                BEGIN
-                    ALTER TABLE pages DROP CONSTRAINT IF EXISTS pages_site_id_fkey;
-                    ALTER TABLE pages
-                        ADD CONSTRAINT pages_site_id_fkey
-                        FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE;
-
-                    ALTER TABLE articles DROP CONSTRAINT IF EXISTS articles_site_id_fkey;
-                    ALTER TABLE articles
-                        ADD CONSTRAINT articles_site_id_fkey
-                        FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE;
-                EXCEPTION WHEN others THEN
-                    NULL;
-                END $$;
-            """)
 
     @staticmethod
     def merge_rss_feeds(existing: List[Dict], new: List[Dict]) -> List[Dict]:
@@ -372,7 +199,7 @@ class Database:
                 except Exception:
                     pass
             rows = await conn.fetch(
-                "SELECT id, url, domain, rss_feeds FROM sites ORDER BY id ASC"
+                "SELECT id, url, domain FROM sites ORDER BY id ASC"
             )
             groups = defaultdict(list)
             for row in rows:
@@ -388,24 +215,24 @@ class Database:
                     {
                         "id": row["id"],
                         "domain": domain,
-                        "rss_feeds": self._parse_json_field(row["rss_feeds"]),
                     }
                 )
 
             deleted = 0
+            from repositories.normalized_sync import sync_rss_feeds_list
+            from repositories.normalized_read import load_site_rss_feeds
+
             for key, items in groups.items():
                 if key.startswith("__orphan_"):
                     continue
                 keep = items[0]
                 feeds: List[Dict] = []
                 for item in items:
-                    raw = item.get("rss_feeds") or []
-                    if isinstance(raw, list):
-                        feeds.extend(raw)
+                    raw = await load_site_rss_feeds(conn, int(item["id"]))
+                    feeds.extend(raw)
                 feeds = self.merge_rss_feeds([], feeds)
 
                 for dup in items[1:]:
-                    # Deplace les articles non deja presents sur le site garde
                     await conn.execute(
                         """
                         UPDATE articles AS a
@@ -427,6 +254,18 @@ class Database:
                         dup["id"],
                     )
                     await conn.execute(
+                        """
+                        UPDATE rss_feeds SET site_id = $1
+                        WHERE site_id = $2
+                          AND NOT EXISTS (
+                            SELECT 1 FROM rss_feeds r2
+                            WHERE r2.site_id = $1 AND r2.url = rss_feeds.url
+                          )
+                        """,
+                        keep["id"],
+                        dup["id"],
+                    )
+                    await conn.execute(
                         "DELETE FROM sites WHERE id = $1", dup["id"]
                     )
                     deleted += 1
@@ -435,13 +274,17 @@ class Database:
                     """
                     UPDATE sites
                     SET domain = $1,
-                        rss_feeds = $2,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE id = $3
+                    WHERE id = $2
                     """,
                     keep["domain"] or key,
-                    json.dumps(feeds),
                     keep["id"],
+                )
+                await sync_rss_feeds_list(
+                    conn,
+                    is_sqlite=self.is_sqlite,
+                    site_id=int(keep["id"]),
+                    feeds=feeds,
                 )
 
             if self.is_sqlite:
@@ -564,18 +407,21 @@ class Database:
             if rss_feeds is not None:
                 feeds = rss_feeds
                 if merge_feeds:
-                    row = await conn.fetchrow(
-                        "SELECT rss_feeds FROM sites WHERE id = $1", site_id
-                    )
-                    existing = (
-                        self._parse_json_field(row["rss_feeds"]) if row else []
-                    )
-                    if not isinstance(existing, list):
-                        existing = []
+                    from repositories.normalized_read import load_site_rss_feeds
+
+                    existing = await load_site_rss_feeds(conn, site_id)
                     feeds = self.merge_rss_feeds(existing, rss_feeds)
                 await conn.execute(
-                    "UPDATE sites SET status = $1, rss_feeds = $2, total_pages_analyzed = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4",
-                    status, json.dumps(feeds), total_pages, site_id
+                    "UPDATE sites SET status = $1, total_pages_analyzed = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3",
+                    status, total_pages, site_id
+                )
+                from repositories.normalized_sync import sync_rss_feeds_list
+
+                await sync_rss_feeds_list(
+                    conn,
+                    is_sqlite=self.is_sqlite,
+                    site_id=site_id,
+                    feeds=feeds,
                 )
             else:
                 await conn.execute(
@@ -640,27 +486,59 @@ class Database:
                 )
 
     async def add_page_analysis(self, site_id: int, url: str, title: str = None, rss_feeds: List[Dict] = None):
-        """Ajoute l'analyse d'une page"""
+        """Ajoute ou met a jour une page (unique site_id+url) ; feeds -> rss_feeds."""
         async with self.pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO pages (site_id, url, title, rss_feeds) VALUES ($1, $2, $3, $4)",
-                site_id, url, title, json.dumps(rss_feeds or [])
+            if self.is_sqlite:
+                await conn.execute(
+                    """
+                    INSERT INTO pages (site_id, url, title)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT(site_id, url) DO UPDATE SET
+                        title = excluded.title,
+                        analyzed_at = CURRENT_TIMESTAMP
+                    """,
+                    site_id,
+                    url,
+                    title,
+                )
+            else:
+                await conn.execute(
+                    """
+                    INSERT INTO pages (site_id, url, title)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (site_id, url) DO UPDATE SET
+                        title = EXCLUDED.title,
+                        analyzed_at = CURRENT_TIMESTAMP
+                    """,
+                    site_id,
+                    url,
+                    title,
+                )
+            from repositories.normalized_sync import sync_rss_feeds_list
+
+            page = await conn.fetchrow(
+                "SELECT id FROM pages WHERE site_id = $1 AND url = $2 ORDER BY id DESC LIMIT 1",
+                site_id,
+                url,
+            )
+            page_id = int(page["id"]) if page else None
+            await sync_rss_feeds_list(
+                conn,
+                is_sqlite=self.is_sqlite,
+                site_id=site_id,
+                feeds=rss_feeds or [],
+                source_page_id=page_id,
             )
 
     async def get_site(self, site_id: int) -> Optional[Dict]:
         """Récupère les détails d'un site"""
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM sites WHERE id = $1",
-                site_id
-            )
-            if row:
-                return self._row_to_dict(row)
-            return None
+        from repositories.sites_repo import SitesRepository
+
+        site = await SitesRepository(self.pool, is_sqlite=self.is_sqlite).get_by_id(site_id)
+        return site.to_api_dict() if site else None
 
     async def delete_site(self, site_id: int) -> Optional[Dict]:
-        """Supprime un site ; pages + articles partent via ON DELETE CASCADE.
-        Les feeds (JSONB sur sites/pages) disparaissent avec."""
+        """Supprime un site ; pages + articles partent via ON DELETE CASCADE."""
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 site = await conn.fetchrow("SELECT * FROM sites WHERE id = $1", site_id)
@@ -672,7 +550,12 @@ class Database:
                 pages = await conn.fetchval(
                     "SELECT COUNT(*) FROM pages WHERE site_id = $1", site_id
                 )
-                data = self._row_to_dict(site)
+                from repositories.sites_repo import SitesRepository
+
+                record = await SitesRepository(
+                    self.pool, is_sqlite=self.is_sqlite
+                ).get_by_id(site_id)
+                data = record.to_api_dict() if record else self._row_to_dict(site)
                 await conn.execute("DELETE FROM sites WHERE id = $1", site_id)
                 return {
                     "site": data,
@@ -686,9 +569,10 @@ class Database:
 
     async def get_all_sites(self) -> List[Dict]:
         """Récupère tous les sites analysés"""
-        async with self.pool.acquire() as conn:
-            rows = await conn.fetch("SELECT * FROM sites ORDER BY created_at DESC")
-            return [self._row_to_dict(row) for row in rows]
+        from repositories.sites_repo import SitesRepository
+
+        sites = await SitesRepository(self.pool, is_sqlite=self.is_sqlite).list_all()
+        return [s.to_api_dict() for s in sites]
 
     async def get_site_pages(self, site_id: int) -> List[Dict]:
         """Récupère toutes les pages d'un site"""
@@ -697,41 +581,28 @@ class Database:
                 "SELECT * FROM pages WHERE site_id = $1 ORDER BY analyzed_at DESC",
                 site_id
             )
-            return [self._row_to_dict(row) for row in rows]
+            pages = [self._row_to_dict(row) for row in rows]
+            from repositories.normalized_read import hydrate_pages_batch
+
+            return await hydrate_pages_batch(conn, pages, is_sqlite=self.is_sqlite)
 
     async def get_site_articles(self, site_id: int, limit: int = 100) -> List[Dict]:
         """Liste articles (sans gros corps HTML - pour le panneau lecteur)."""
-        order = (
-            "ORDER BY published_at DESC, fetched_at DESC"
-            if self.is_sqlite
-            else "ORDER BY published_at DESC NULLS LAST, fetched_at DESC"
-        )
-        async with self.pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT id, site_id, feed_url, title, link, summary, author,
-                       published_at, guid, dedupe_key, fetched_at,
-                       images, article_meta, enriched_at, enrich_status, enrich_error
-                FROM articles
-                WHERE site_id = $1
-                {order}
-                LIMIT $2
-                """,
-                site_id,
-                limit,
-            )
-            return [self._row_to_dict(row) for row in rows]
+        from repositories.articles_repo import ArticlesRepository
+
+        articles = await ArticlesRepository(
+            self.pool, is_sqlite=self.is_sqlite
+        ).list_by_site(site_id, limit=limit, with_body=False)
+        return [a.to_api_dict() for a in articles]
 
     async def get_article(self, article_id: int) -> Optional[Dict]:
         """Detail d'un article (contenu enrichi inclus)."""
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM articles WHERE id = $1",
-                article_id,
-            )
-            if row:
-                return self._row_to_dict(row)
-            return None
+        from repositories.articles_repo import ArticlesRepository
+
+        article = await ArticlesRepository(
+            self.pool, is_sqlite=self.is_sqlite
+        ).get_by_id(article_id)
+        return article.to_api_dict() if article else None
 
     async def list_articles_needing_enrichment(
         self, site_id: int, limit: int = 50
@@ -757,6 +628,87 @@ class Database:
             )
             return [self._row_to_dict(row) for row in rows]
 
+    async def list_articles_needing_analysis(
+        self, site_id: int, limit: int = 50
+    ) -> List[Dict]:
+        """Articles enrichis sans analyse texte ok (colonne analysis_status)."""
+        order = (
+            "ORDER BY enriched_at DESC, fetched_at DESC"
+            if self.is_sqlite
+            else "ORDER BY enriched_at DESC NULLS LAST, fetched_at DESC"
+        )
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT id, link, enrich_status, analysis_status
+                FROM articles
+                WHERE site_id = $1
+                  AND enrich_status = 'ok'
+                  AND COALESCE(content_text, '') != ''
+                  AND (
+                    analysis_status IS NULL
+                    OR analysis_status NOT IN ('ok', 'pending')
+                  )
+                {order}
+                LIMIT $2
+                """,
+                site_id,
+                limit,
+            )
+            return [self._row_to_dict(row) for row in rows]
+
+    async def set_article_analysis_pending(self, article_id: int) -> None:
+        """Colonne analysis_status = source de verite (JSON legacy allégé)."""
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE articles SET
+                    analysis_status = 'pending',
+                    analysis_error = NULL
+                WHERE id = $1
+                """,
+                article_id,
+            )
+
+    async def update_article_analysis(
+        self,
+        article_id: int,
+        *,
+        analysis: Optional[Dict] = None,
+        analysis_status: str = "ok",
+        analysis_error: Optional[str] = None,
+        analyzed_at: Optional[str] = None,
+    ) -> None:
+        """Persiste l'analyse dans colonnes + article_analyses (pas le blob JSON)."""
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE articles SET
+                    analysis_status = $2,
+                    analysis_error = $3,
+                    analyzed_at = COALESCE($4, analyzed_at)
+                WHERE id = $1
+                """,
+                article_id,
+                analysis_status,
+                analysis_error,
+                analyzed_at,
+            )
+            from repositories.normalized_sync import (
+                has_normalized_tables,
+                sync_article_analyses,
+            )
+
+            if analysis is not None and await has_normalized_tables(
+                conn, is_sqlite=self.is_sqlite
+            ):
+                await sync_article_analyses(
+                    conn,
+                    is_sqlite=self.is_sqlite,
+                    article_id=article_id,
+                    analysis=analysis,
+                )
+
     async def set_article_enrich_pending(self, article_id: int) -> None:
         async with self.pool.acquire() as conn:
             await conn.execute(
@@ -776,39 +728,54 @@ class Database:
         content_html: Optional[str] = None,
         content_text: Optional[str] = None,
         images: Optional[List[Dict]] = None,
+        videos: Optional[List[Dict]] = None,
+        audios: Optional[List[Dict]] = None,
         article_meta: Optional[Dict] = None,
         enrich_status: str = "ok",
         enrich_error: Optional[str] = None,
         title: Optional[str] = None,
         author: Optional[str] = None,
     ) -> None:
-        """Persiste le resultat d'enrichissement (ok ou error)."""
+        """Persiste l'enrichissement ; media/meta -> tables normalisees."""
         async with self.pool.acquire() as conn:
             await conn.execute(
                 """
                 UPDATE articles SET
                     content_html = COALESCE($2, content_html),
                     content_text = COALESCE($3, content_text),
-                    images = COALESCE($4, images),
-                    article_meta = COALESCE($5, article_meta),
-                    enrich_status = $6,
-                    enrich_error = $7,
-                    enriched_at = CASE WHEN $6 = 'ok' THEN CURRENT_TIMESTAMP ELSE enriched_at END,
-                    title = COALESCE($8, title),
-                    author = COALESCE($9, author)
+                    enrich_status = $4,
+                    enrich_error = $5,
+                    enriched_at = CASE WHEN $8 = 'ok' THEN CURRENT_TIMESTAMP ELSE enriched_at END,
+                    title = COALESCE($6, title),
+                    author = COALESCE($7, author)
                 WHERE id = $1
                 """,
                 article_id,
                 content_html,
                 content_text,
-                json.dumps(images) if images is not None else None,
-                json.dumps(article_meta) if article_meta is not None else None,
                 enrich_status,
                 enrich_error,
                 ((title or "")[:1000] or None) if title is not None else None,
                 ((author or "")[:500] or None) if author is not None else None,
+                enrich_status,
             )
+            from repositories.normalized_sync import sync_article_after_enrichment
 
+            if (
+                images is not None
+                or videos is not None
+                or audios is not None
+                or article_meta is not None
+            ):
+                await sync_article_after_enrichment(
+                    conn,
+                    is_sqlite=self.is_sqlite,
+                    article_id=article_id,
+                    images=images if isinstance(images, list) else [],
+                    meta=article_meta if isinstance(article_meta, dict) else {},
+                    videos=videos,
+                    audios=audios,
+                )
     async def upsert_article(
         self,
         site_id: int,
@@ -819,9 +786,15 @@ class Database:
         author: str = None,
         published_at=None,
         guid: str = None,
+        images: Optional[List[Dict]] = None,
+        videos: Optional[List[Dict]] = None,
+        audios: Optional[List[Dict]] = None,
+        article_meta: Optional[Dict] = None,
     ) -> bool:
         """Insert/update un article. Dedup sur dedupe_key (guid ou lien normalise)."""
         from utils import article_dedupe_key, normalize_identifier, normalize_url
+        from repositories.normalized_read import load_article_images, load_article_meta_norm
+        from repositories.normalized_sync import sync_article_after_upsert
 
         link_n = normalize_url(link)
         if not link_n:
@@ -831,6 +804,16 @@ class Database:
         feed_n = normalize_url(feed_url) or (feed_url or "")[:1000]
 
         async with self.pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                """
+                SELECT id, enrich_status
+                FROM articles
+                WHERE site_id = $1 AND dedupe_key = $2
+                """,
+                site_id,
+                key[:2100],
+            )
+
             await conn.execute(
                 """
                 INSERT INTO articles
@@ -855,6 +838,65 @@ class Database:
                 published_at,
                 (guid_n or "")[:2000] or None,
                 key[:2100],
+            )
+
+            art = await conn.fetchrow(
+                """
+                SELECT id FROM articles
+                WHERE site_id = $1 AND dedupe_key = $2
+                """,
+                site_id,
+                key[:2100],
+            )
+            if not art:
+                return True
+
+            article_id = int(art["id"])
+            images_final = images if isinstance(images, list) else []
+            meta_final = article_meta if isinstance(article_meta, dict) else {}
+
+            # Si deja enrichi : ne pas ecraser images/meta normalises
+            if existing and existing.get("enrich_status") == "ok":
+                if images is not None:
+                    images_final = await load_article_images(conn, article_id)
+                if article_meta is not None:
+                    norm = await load_article_meta_norm(conn, article_id)
+                    if norm:
+                        meta_final = {
+                            "canonical_url": norm.get("canonical_url"),
+                            "date_published": norm.get("date_published"),
+                            "schema_type": norm.get("schema_type"),
+                            "reading_time_minutes": norm.get("reading_time_minutes"),
+                            "primary_image": norm.get("primary_image_url"),
+                            "domain": norm.get("domain"),
+                        }
+                        extra = self._parse_json_field(norm.get("extra"))
+                        if isinstance(extra, dict):
+                            meta_final.update(extra)
+                    meta_final = self._merge_article_meta_dict(meta_final, article_meta)
+            elif existing and (images is not None or article_meta is not None):
+                if images is not None:
+                    images_final = self._merge_image_lists(
+                        await load_article_images(conn, article_id), images
+                    )
+                if article_meta is not None:
+                    # merge keywords/meta depuis tables via hydrate light
+                    from repositories.normalized_read import load_article_keywords
+
+                    kws = await load_article_keywords(conn, article_id)
+                    base_meta = {"keywords": [k["keyword"] for k in kws]} if kws else {}
+                    meta_final = self._merge_article_meta_dict(base_meta, article_meta)
+
+            await sync_article_after_upsert(
+                conn,
+                is_sqlite=self.is_sqlite,
+                site_id=site_id,
+                article_id=article_id,
+                feed_url=feed_n,
+                images=images_final,
+                meta=meta_final,
+                videos=videos,
+                audios=audios,
             )
             return True
 
@@ -931,14 +973,11 @@ class Database:
 
     async def ingest_rss_articles(self, site_id: int, feeds: List[Dict], max_per_feed: int = 50) -> int:
         """Parse chaque flux RSS et stocke les articles. Retourne le nombre upserted."""
-        import feedparser
-        from datetime import datetime, timezone
-        from time import mktime
-
-        feeds = feeds or []
+        from services.ingest_service import IngestService
         from utils import collapse_equivalent_feeds
 
-        feeds = collapse_equivalent_feeds(feeds)
+        feeds = collapse_equivalent_feeds(feeds or [])
+        service = IngestService(max_entries=max_per_feed)
         seen_feed_urls = set()
         count = 0
 
@@ -948,39 +987,22 @@ class Database:
                 continue
             seen_feed_urls.add(feed_url)
 
-            try:
-                parsed = feedparser.parse(feed_url)
-            except Exception:
-                continue
-
-            for entry in (parsed.entries or [])[:max_per_feed]:
-                link = entry.get("link") or entry.get("id") or ""
-                if not link:
-                    continue
-
-                published_at = None
-                published_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
-                if published_parsed:
-                    try:
-                        published_at = datetime.fromtimestamp(mktime(published_parsed), tz=timezone.utc).replace(tzinfo=None)
-                    except (OverflowError, ValueError, TypeError):
-                        published_at = None
-
-                summary = entry.get("summary") or entry.get("description") or ""
-                if len(summary) > 4000:
-                    summary = summary[:4000] + "…"
-
-                created = await self.upsert_article(
+            for art in service.parse_feed(feed_url):
+                ok = await self.upsert_article(
                     site_id=site_id,
-                    feed_url=feed_url,
-                    title=entry.get("title") or "Sans titre",
-                    link=link,
-                    summary=summary or None,
-                    author=entry.get("author"),
-                    published_at=published_at,
-                    guid=entry.get("id") or entry.get("guid"),
+                    feed_url=art.feed_url,
+                    title=art.title,
+                    link=art.link,
+                    summary=art.summary,
+                    author=art.author,
+                    published_at=art.published_at,
+                    guid=art.guid,
+                    images=art.images or None,
+                    videos=getattr(art, "videos", None) or None,
+                    audios=getattr(art, "audios", None) or None,
+                    article_meta=art.article_meta or None,
                 )
-                if created:
+                if ok:
                     count += 1
 
         return count
