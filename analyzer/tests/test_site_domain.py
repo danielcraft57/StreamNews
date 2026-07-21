@@ -77,8 +77,15 @@ async def test_upsert_site_rejects_invalid_url():
 
 
 @pytest.mark.asyncio
-async def test_update_site_status_merges_feeds():
+async def test_update_site_status_merges_feeds(monkeypatch):
+    # Unit isole : SQLite + pas de fetch reseau (collapse_equivalent_feeds).
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./data/streamnews.db")
+    monkeypatch.setattr(
+        "utils.feeds.collapse_equivalent_feeds",
+        lambda feeds, **kwargs: list(feeds or []),
+    )
     db = Database()
+    assert db.is_sqlite is True
     mock_conn = AsyncMock()
     existing_rows = [
         {
@@ -99,11 +106,18 @@ async def test_update_site_status_merges_feeds():
     update_sql = mock_conn.execute.await_args_list[0].args[0]
     assert "UPDATE sites SET status" in update_sql
     assert "rss_feeds" not in update_sql
+    # UPDATE sites + INSERT OR IGNORE par feed synchronise
     assert mock_conn.execute.await_count >= 2
+    assert any("INSERT" in c.args[0] and "rss_feeds" in c.args[0] for c in mock_conn.execute.await_args_list)
 
 
 @pytest.mark.asyncio
-async def test_update_site_status_can_replace_feeds():
+async def test_update_site_status_can_replace_feeds(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./data/streamnews.db")
+    monkeypatch.setattr(
+        "utils.feeds.collapse_equivalent_feeds",
+        lambda feeds, **kwargs: list(feeds or []),
+    )
     db = Database()
     mock_conn = AsyncMock()
     mock_conn.fetchrow = AsyncMock(return_value={"id": 9})
