@@ -23,6 +23,8 @@ env/
 ENV/
 .env
 .env.local
+.env.production
+.env.*.local
 .env.*
 !.env.example
 !.env.local.example
@@ -35,8 +37,12 @@ id_rsa*
 id_ed25519*
 *.secret
 *.env.bak
+*.env.backup
+.envrc
 credentials.json
 secrets/
+**/secrets.json
+**/credentials*.json
 
 # Notes locales agents / IDE Cursor (hors repo public)
 AGENTS.md

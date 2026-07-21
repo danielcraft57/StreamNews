@@ -33,8 +33,11 @@ Write-Host "[init-db] env=$($env:STREAMNEWS_ENV) url=$dbUrl"
 Write-Host "[init-db] lancement Python..."
 
 Push-Location analyzer
-$resetArg = if ($Reset) { "--reset" } else { "" }
-& $Python -u init_db_cli.py @resetArg
+if ($Reset) {
+    & $Python -u init_db_cli.py --reset
+} else {
+    & $Python -u init_db_cli.py
+}
 if ($LASTEXITCODE -ne 0) { throw "init-db a echoue (code $LASTEXITCODE)" }
 Pop-Location
 

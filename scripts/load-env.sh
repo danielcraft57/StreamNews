@@ -48,3 +48,9 @@ source "$ENV_FILE"
 set +a
 
 echo "Env charge: $ENV_FILE (STREAMNEWS_ENV=${STREAMNEWS_ENV:-?})"
+
+if [[ "$USE_LOCAL" -eq 0 ]]; then
+  if [[ "${POSTGRES_PASSWORD:-}" == "CHANGE_ME" ]] || [[ "${DATABASE_URL:-}" == *CHANGE_ME* ]]; then
+    echo "ATTENTION: Postgres non configure (CHANGE_ME dans .env)."
+  fi
+fi

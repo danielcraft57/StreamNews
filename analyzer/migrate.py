@@ -61,8 +61,13 @@ def run_migrations(database_url: str | None = None, *, reset: bool = False) -> s
     _ensure_sqlite_parent(url)
     cfg = alembic_config(url)
     cfg.set_main_option("sqlalchemy.url", url)
-    if reset and _sqlite_db_exists(url):
-        command.downgrade(cfg, "base")
+    if reset:
+        # SQLite neuf : pas de downgrade (fichier absent).
+        # Postgres / SQLite existant : recreate complete.
+        if url.startswith("sqlite:") and not _sqlite_db_exists(url):
+            pass
+        else:
+            command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")
     _repair_schema_after_upgrade(url)
     return "head"

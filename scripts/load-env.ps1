@@ -50,3 +50,11 @@ Get-Content $EnvFile | ForEach-Object {
 }
 
 Write-Host "Env charge: $EnvFile (STREAMNEWS_ENV=$($env:STREAMNEWS_ENV))"
+
+if (-not $UseLocal) {
+    $pw = $env:POSTGRES_PASSWORD
+    $url = $env:DATABASE_URL
+    if (($pw -eq "CHANGE_ME") -or ($url -match "CHANGE_ME")) {
+        Write-Host "ATTENTION: Postgres non configure (CHANGE_ME dans .env)."
+    }
+}

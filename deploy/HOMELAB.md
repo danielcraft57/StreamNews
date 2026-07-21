@@ -97,3 +97,6 @@ Visages : optionnel (`FACE_DETECT_ENABLED=0` par defaut). Backends
 `face_recognition` ou `insightface` via `FACE_DETECT_BACKEND` +
 `pip install -r analyzer/requirements-faces.txt`. Embeddings stockes dans
 `article_faces` ; match auto vers `persons` (media NER + similarite).
+
+Avant PR / deploy : verifier Postgres avec les tests integration
+(`pytest -m integration` en CI ou `DATABASE_URL=postgresql://... pytest -m integration`).

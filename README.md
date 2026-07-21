@@ -74,6 +74,7 @@ Modeles versionnes (sans secrets) : `.env.example`, `.env.local.example`.
 | `scripts/install.ps1` / `install.sh` | venv + deps Python/Node + cree les .env d'exemple |
 | `scripts/load-env.ps1` / `load-env.sh` | charge `.env.local` (`-Local` / `--local`) ou `.env` |
 | `scripts/init-db.ps1` / `init-db.sh` | cree le schema (`-Local` / `--local`, `-Reset` / `--reset`) |
+| `scripts/clean-local.ps1` / `clean-local.sh` | vide caches pytest + logs, supprime SQLite locale |
 | `scripts/dev.ps1` / `dev.sh` | lance analyzer + worker + web |
 | `scripts/e2e-stack.sh` | stack pour Playwright (CI / Postgres local) |
 
