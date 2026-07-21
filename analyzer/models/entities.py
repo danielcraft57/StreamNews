@@ -189,7 +189,7 @@ class ArticleRecord(BaseModel):
         if self.faces:
             meta["faces_count"] = len(self.faces)
 
-        return {
+        out = {
             "id": self.id,
             "site_id": self.site_id,
             "feed_id": self.feed_id,
@@ -200,8 +200,6 @@ class ArticleRecord(BaseModel):
             "author": self.author,
             "published_at": self.published_at.isoformat() if self.published_at else None,
             "guid": self.guid,
-            "content_html": self.content_html,
-            "content_text": self.content_text,
             "enrich_status": self.enrich_status,
             "enrich_error": self.enrich_error,
             "enriched_at": self.enriched_at.isoformat() if self.enriched_at else None,
@@ -244,6 +242,12 @@ class ArticleRecord(BaseModel):
             ],
             "article_meta": meta,
         }
+        # Liste legere (with_body=False) : pas de gros corps dans le JSON
+        if self.content_html is not None:
+            out["content_html"] = self.content_html
+        if self.content_text is not None:
+            out["content_text"] = self.content_text
+        return out
 
 
 class SiteRecord(BaseModel):
