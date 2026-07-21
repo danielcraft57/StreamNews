@@ -15,6 +15,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy import JSON
@@ -141,7 +142,7 @@ article_media = Table(
     Column("duration_ms", Integer),
     Column("width", Integer),
     Column("height", Integer),
-    Column("is_primary", Boolean, nullable=False, server_default="0"),
+    Column("is_primary", Boolean, nullable=False, server_default=false()),
     Column("sort_order", Integer, nullable=False, server_default="0"),
     Column("extra", JsonDocument, nullable=False, server_default="{}"),
     Index("idx_article_media_article", "article_id"),

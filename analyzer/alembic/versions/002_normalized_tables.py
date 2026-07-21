@@ -102,7 +102,7 @@ def upgrade() -> None:
             sa.Column("url", sa.String(length=2000), nullable=False),
             sa.Column("alt", sa.String(length=500), nullable=True),
             sa.Column("source", sa.String(length=50), nullable=True),
-            sa.Column("is_primary", sa.Boolean(), server_default=sa.text("0"), nullable=False),
+            sa.Column("is_primary", sa.Boolean(), server_default=sa.false(), nullable=False),
             sa.Column("sort_order", sa.Integer(), server_default="0", nullable=False),
             sa.ForeignKeyConstraint(["article_id"], ["articles.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
