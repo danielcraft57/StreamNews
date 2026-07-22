@@ -28,6 +28,10 @@ export class StreamNewsApp {
         this.trendsDays = 30;
         this.trendsKind = 'all';
         this._selectedTrendTerm = null;
+        this._radarIdeas = [];
+        this.radarDays = 30;
+        this.radarTheme = 'all';
+        this._selectedRadarTheme = null;
         this._pendingVictorySiteId = null;
         this.init();
     }
@@ -40,6 +44,7 @@ export class StreamNewsApp {
         this.setupSettings();
         this.setupJobsPane();
         this.setupTrendsPane();
+        this.setupRadarPane();
         this.loadSites();
         this.loadFeed();
         this.connectWebSocket();
@@ -277,6 +282,7 @@ export class StreamNewsApp {
             else if (action === 'go-favoris') this.showView('favoris');
             else if (action === 'go-jobs') this.showView('jobs');
             else if (action === 'go-tendances') this.showView('tendances');
+            else if (action === 'go-radar') this.showView('radar');
             else if (action === 'reload-site') {
                 this.showView('sources');
                 this.updateStatus('Recharge le flux depuis Sources', 'info');
@@ -361,6 +367,9 @@ export class StreamNewsApp {
         document.querySelector('[data-nav="tendances"]')?.addEventListener('click', () => {
             this.showView('tendances');
         });
+        document.querySelector('[data-nav="radar"]')?.addEventListener('click', () => {
+            this.showView('radar');
+        });
         document.querySelector('[data-nav="settings"]')?.addEventListener('click', () => {
             this.showView('settings');
         });
@@ -410,11 +419,13 @@ export class StreamNewsApp {
         const sourcesPane = document.getElementById('sourcesPane');
         const jobsPane = document.getElementById('jobsPane');
         const trendsPane = document.getElementById('trendsPane');
+        const radarPane = document.getElementById('radarPane');
         const settingsPane = document.getElementById('settingsPane');
 
         const isSources = view === 'sources';
         const isJobs = view === 'jobs';
         const isTendances = view === 'tendances';
+        const isRadar = view === 'radar';
         const isSettings = view === 'settings';
         const isFavoris = view === 'favoris';
         const isFeedLike = view === 'feed' || isFavoris;
@@ -423,6 +434,7 @@ export class StreamNewsApp {
             workspace.classList.toggle('view-sources', isSources);
             workspace.classList.toggle('view-jobs', isJobs);
             workspace.classList.toggle('view-tendances', isTendances);
+            workspace.classList.toggle('view-radar', isRadar);
             workspace.classList.toggle('view-settings', isSettings);
         }
         if (feedPane) feedPane.hidden = !isFeedLike;
@@ -430,6 +442,7 @@ export class StreamNewsApp {
         if (sourcesPane) sourcesPane.hidden = !isSources;
         if (jobsPane) jobsPane.hidden = !isJobs;
         if (trendsPane) trendsPane.hidden = !isTendances;
+        if (radarPane) radarPane.hidden = !isRadar;
         if (settingsPane) settingsPane.hidden = !isSettings;
 
         document.querySelectorAll('.sidebar-nav-item[data-nav]').forEach((btn) => {
@@ -447,6 +460,10 @@ export class StreamNewsApp {
         }
         if (isTendances) {
             this.loadTrends();
+            return;
+        }
+        if (isRadar) {
+            this.loadRadar();
             return;
         }
         if (isSettings) {
@@ -520,7 +537,7 @@ export class StreamNewsApp {
         });
     }
 
-    async openAddSourceModal({ keepVictory = false } = {}) {
+    async openAddSourceModal({ keepVictory = false, url = null } = {}) {
         const modal = document.getElementById('addSourceModal');
         if (modal) {
             modal.hidden = false;
@@ -531,6 +548,7 @@ export class StreamNewsApp {
         const progress = document.getElementById('addSourceProgress');
         const actions = document.getElementById('addSourceActions');
         const analyzeBtn = document.getElementById('analyzeBtn');
+        const urlField = document.getElementById('url');
 
         if (keepVictory || (victory && !victory.hidden)) {
             if (form) form.hidden = true;
@@ -546,7 +564,11 @@ export class StreamNewsApp {
                 analyzeBtn.disabled = false;
                 analyzeBtn.hidden = false;
             }
-            setTimeout(() => document.getElementById('url')?.focus?.(), 40);
+            if (url && urlField) {
+                urlField.value = url;
+                try { urlField.setAttribute('value', url); } catch (_) { /* md field */ }
+            }
+            setTimeout(() => urlField?.focus?.(), 40);
         }
     }
 
@@ -793,6 +815,139 @@ export class StreamNewsApp {
         detail.innerHTML = tv?.renderTrendsDetail
             ? tv.renderTrendsDetail(selected)
             : '';
+    }
+
+    setupRadarPane() {
+        document.getElementById('radarWindow')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-radar-days]');
+            if (!btn) return;
+            this.radarDays = Number(btn.dataset.radarDays) || 30;
+            document.querySelectorAll('[data-radar-days]').forEach((el) => {
+                el.classList.toggle('is-active', Number(el.dataset.radarDays) === this.radarDays);
+            });
+            this.loadRadar({ refresh: false });
+        });
+        document.getElementById('radarTheme')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-radar-theme-filter]');
+            if (!btn) return;
+            this.radarTheme = btn.dataset.radarThemeFilter || 'all';
+            document.querySelectorAll('[data-radar-theme-filter]').forEach((el) => {
+                el.classList.toggle('is-active', el.dataset.radarThemeFilter === this.radarTheme);
+            });
+            this.renderRadar();
+        });
+        document.getElementById('radarRefresh')?.addEventListener('click', () => {
+            this.loadRadar({ refresh: true });
+        });
+        document.getElementById('radarList')?.addEventListener('click', (e) => {
+            const row = e.target.closest('[data-radar-theme]');
+            if (!row) return;
+            this._selectedRadarTheme = row.dataset.radarTheme;
+            this.renderRadar();
+        });
+        document.getElementById('radarDetail')?.addEventListener('click', (e) => {
+            const packBtn = e.target.closest('[data-radar-source-url]');
+            if (packBtn) {
+                const url = packBtn.dataset.radarSourceUrl;
+                if (url) this.openAddSourceModal({ url });
+                return;
+            }
+            const searchBtn = e.target.closest('[data-radar-search]');
+            if (searchBtn) {
+                const term = searchBtn.dataset.radarSearch;
+                if (!term) return;
+                this.showView('feed');
+                const overlay = document.getElementById('searchOverlay');
+                const input = document.getElementById('searchInput');
+                if (overlay && input) {
+                    overlay.classList.add('open');
+                    input.value = term;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.focus();
+                }
+                return;
+            }
+            const artBtn = e.target.closest('[data-radar-article]');
+            if (artBtn) {
+                const id = Number(artBtn.dataset.radarArticle);
+                if (!id) return;
+                this.showView('feed');
+                this.selectArticle(id);
+            }
+        });
+    }
+
+    async loadRadar({ refresh = false } = {}) {
+        const list = document.getElementById('radarList');
+        if (list) list.innerHTML = '<p class="feed-empty">Scan du radar...</p>';
+        try {
+            const data = window.SN?.api
+                ? await window.SN.api.getRadar({
+                    days: this.radarDays,
+                    theme: 'all',
+                    limit: 40,
+                    refresh,
+                })
+                : await (async () => {
+                    const params = new URLSearchParams({
+                        days: String(this.radarDays),
+                        limit: '40',
+                        theme: 'all',
+                    });
+                    if (refresh) params.set('refresh', '1');
+                    const res = await fetch(`/api/radar?${params}`);
+                    return res.json();
+                })();
+            this._radarIdeas = Array.isArray(data.ideas) ? data.ideas : [];
+            const sub = document.getElementById('radarSubtitle');
+            if (sub) {
+                const when = data.computed_at
+                    ? `Maj ${new Date(data.computed_at).toLocaleString('fr-FR')}`
+                    : 'Intent + themes dans tes articles';
+                sub.textContent = `${data.count || this._radarIdeas.length} signaux · ${this.radarDays} j · ${when}`;
+            }
+            if (!this._selectedRadarTheme && this._radarIdeas.length) {
+                this._selectedRadarTheme = this._radarIdeas[0].theme;
+            }
+            this.renderRadar();
+            if (refresh) this.updateStatus('Radar mis a jour', 'success');
+        } catch (err) {
+            console.error(err);
+            if (list) {
+                list.innerHTML = `<p class="feed-empty">Impossible de charger le radar (${this.escapeHtml(err.message || 'erreur')}).</p>`;
+            }
+            this.updateStatus('Erreur radar', 'error');
+        }
+    }
+
+    renderRadar() {
+        const list = document.getElementById('radarList');
+        const detail = document.getElementById('radarDetail');
+        if (!list || !detail) return;
+        const rv = window.SN?.radarView;
+        let ideas = this._radarIdeas.slice();
+        if (this.radarTheme && this.radarTheme !== 'all') {
+            ideas = ideas.filter((i) => i.theme === this.radarTheme);
+        }
+        const packHtml = rv?.renderRecommendedSources
+            ? rv.renderRecommendedSources()
+            : '';
+        if (!ideas.length) {
+            list.innerHTML = rv?.renderRadarList
+                ? rv.renderRadarList([])
+                : '<p class="feed-empty">Aucun signal pour ce filtre.</p>';
+            detail.innerHTML = `${rv?.renderRadarDetail ? rv.renderRadarDetail(null) : ''}${packHtml}`;
+            return;
+        }
+        if (!ideas.some((i) => i.theme === this._selectedRadarTheme)) {
+            this._selectedRadarTheme = ideas[0].theme;
+        }
+        const maxScore = Math.max(...ideas.map((i) => Number(i.score) || 0), 1);
+        list.innerHTML = rv?.renderRadarList
+            ? rv.renderRadarList(ideas, { selectedTheme: this._selectedRadarTheme, maxScore })
+            : '';
+        const selected = ideas.find((i) => i.theme === this._selectedRadarTheme) || ideas[0];
+        detail.innerHTML = `${rv?.renderRadarDetail ? rv.renderRadarDetail(selected) : ''}${packHtml}`;
     }
 
     pushJob(job) {

@@ -48,6 +48,22 @@ export const api = {
         if (siteId) params.set('site_id', String(siteId));
         return request(`/api/trends/refresh?${params}`, { method: 'POST' });
     },
+    getRadar: ({ days = 30, theme = 'all', limit = 40, refresh = false } = {}) => {
+        const params = new URLSearchParams({
+            days: String(days),
+            theme: String(theme || 'all'),
+            limit: String(limit),
+        });
+        if (refresh) params.set('refresh', '1');
+        return request(`/api/radar?${params}`);
+    },
+    refreshRadar: ({ days = 30, limit = 40 } = {}) => {
+        const params = new URLSearchParams({
+            days: String(days),
+            limit: String(limit),
+        });
+        return request(`/api/radar/refresh?${params}`, { method: 'POST' });
+    },
     getArticle: (id) => request(`/api/articles/${id}`),
     enrichArticle: (id, force = false) =>
         request(`/api/articles/${id}/enrich${force ? '?force=1' : ''}`, { method: 'POST' }),

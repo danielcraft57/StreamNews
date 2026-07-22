@@ -286,6 +286,61 @@ async def refresh_trends(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/radar")
+async def get_radar(
+    days: int = 30,
+    theme: str = "all",
+    limit: int = 40,
+    refresh: bool = False,
+):
+    """Radar idees : opportunites SaaS/IT depuis intent + themes."""
+    try:
+        from services.idea_radar_service import IdeaRadarService
+
+        svc = IdeaRadarService(db)
+        days = max(1, min(days, 365))
+        if refresh:
+            data = await svc.refresh(window_days=days, limit=limit)
+            if theme and theme != "all":
+                data["ideas"] = [i for i in data["ideas"] if i.get("theme") == theme]
+                data["count"] = len(data["ideas"])
+                data["theme"] = theme
+            else:
+                data["theme"] = "all"
+            return data
+
+        data = await svc.list_stored(window_days=days, theme=theme, limit=limit)
+        if not data["ideas"]:
+            refreshed = await svc.refresh(window_days=days, limit=limit)
+            if theme and theme != "all":
+                refreshed["ideas"] = [
+                    i for i in refreshed["ideas"] if i.get("theme") == theme
+                ]
+                refreshed["count"] = len(refreshed["ideas"])
+                refreshed["theme"] = theme
+            else:
+                refreshed["theme"] = "all"
+            return refreshed
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/radar/refresh")
+async def refresh_radar(
+    days: int = 30,
+    limit: int = 40,
+):
+    """Recalcule et persiste le radar idees."""
+    try:
+        from services.idea_radar_service import IdeaRadarService
+
+        svc = IdeaRadarService(db)
+        return await svc.refresh(window_days=days, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/sites/{site_id}/ingest-articles")
 async def ingest_site_articles(site_id: int):
     """Re-parse les flux deja detectes et (re)importe les articles."""

@@ -1647,7 +1647,8 @@
             .app-shell.mockup .workspace.view-sources,
             .app-shell.mockup .workspace.view-jobs,
             .app-shell.mockup .workspace.view-settings,
-            .app-shell.mockup .workspace.view-tendances{
+            .app-shell.mockup .workspace.view-tendances,
+            .app-shell.mockup .workspace.view-radar{
                 grid-template-columns: 1fr;
             }
 
@@ -2047,7 +2048,8 @@
             .app-shell.mockup .sources-pane[hidden],
             .app-shell.mockup .jobs-pane[hidden],
             .app-shell.mockup .settings-pane[hidden],
-            .app-shell.mockup .trends-pane[hidden]{
+            .app-shell.mockup .trends-pane[hidden],
+            .app-shell.mockup .radar-pane[hidden]{
                 display: none !important;
             }
 
@@ -2058,7 +2060,9 @@
             .app-shell.mockup .workspace.view-settings .feed-pane,
             .app-shell.mockup .workspace.view-settings .reader-pane,
             .app-shell.mockup .workspace.view-tendances .feed-pane,
-            .app-shell.mockup .workspace.view-tendances .reader-pane{
+            .app-shell.mockup .workspace.view-tendances .reader-pane,
+            .app-shell.mockup .workspace.view-radar .feed-pane,
+            .app-shell.mockup .workspace.view-radar .reader-pane{
                 display: none !important;
             }
 
@@ -2145,9 +2149,86 @@
             }
 
             .app-shell.mockup .trends-pane,
+            .app-shell.mockup .radar-pane,
             .app-shell.mockup .jobs-pane{
                 padding: 24px 28px 32px;
                 overflow: auto;
+            }
+
+            .app-shell.mockup .radar-pack{
+                margin-top: 18px;
+                padding-top: 14px;
+                border-top: 1px solid var(--line);
+            }
+
+            .app-shell.mockup .radar-pack h4,
+            .app-shell.mockup .radar-intents h4{
+                margin: 0 0 6px;
+                font-size: 0.85rem;
+                color: var(--ink-soft);
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+            }
+
+            .app-shell.mockup .radar-pack-list{
+                display: grid;
+                gap: 8px;
+                margin-top: 10px;
+            }
+
+            .app-shell.mockup .radar-pack-item{
+                text-align: left;
+                border: 1px solid var(--line);
+                background: #fff;
+                border-radius: 10px;
+                padding: 10px 12px;
+                cursor: pointer;
+                display: grid;
+                gap: 2px;
+            }
+
+            .app-shell.mockup .radar-pack-item:hover{
+                border-color: var(--teal);
+                background: #f0fdfa;
+            }
+
+            .app-shell.mockup .radar-row{
+                width: 100%;
+                text-align: left;
+                border: 0;
+                border-bottom: 1px solid var(--line);
+                background: transparent;
+                padding: 14px 16px;
+                cursor: pointer;
+                display: grid;
+                gap: 6px;
+            }
+
+            .app-shell.mockup .radar-row:hover,
+            .app-shell.mockup .radar-row.is-selected{
+                background: #fff7ed;
+            }
+
+            .app-shell.mockup .radar-intent-chips{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                margin-bottom: 14px;
+            }
+
+            .app-shell.mockup .radar-intent-chip{
+                font-size: 0.72rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.03em;
+                color: #9a3412;
+                background: #ffedd5;
+                border-radius: 999px;
+                padding: 3px 8px;
+            }
+
+            .app-shell.mockup .radar-detail-actions{
+                margin-top: 8px;
             }
 
             .app-shell.mockup .pane-header{
@@ -3006,6 +3087,9 @@
                     <button type="button" class="sidebar-nav-item" data-nav="tendances">
                         <i class="fas fa-chart-line"></i> Tendances
                     </button>
+                    <button type="button" class="sidebar-nav-item" data-nav="radar" data-testid="nav-radar">
+                        <i class="fas fa-bullseye"></i> Radar
+                    </button>
                 </div>
                 <div class="sidebar-nav-group">
                     <div class="sidebar-nav-title">Compte</div>
@@ -3137,6 +3221,42 @@
                     </div>
                     <aside id="trendsDetail" class="jobs-detail trends-detail">
                         <p class="feed-empty">Selectionne une tendance pour voir le detail.</p>
+                    </aside>
+                </div>
+            </section>
+
+            <section class="radar-pane" id="radarPane" hidden>
+                <header class="pane-header">
+                    <div>
+                        <h1>Radar idees</h1>
+                        <p class="pane-sub" id="radarSubtitle">Opportunites SaaS / IT dans ton corpus</p>
+                    </div>
+                    <div class="jobs-header-tools">
+                        <div class="jobs-filters" id="radarWindow">
+                            <button type="button" class="chip-filter" data-radar-days="7">7 j</button>
+                            <button type="button" class="chip-filter is-active" data-radar-days="30">30 j</button>
+                            <button type="button" class="chip-filter" data-radar-days="90">90 j</button>
+                        </div>
+                        <div class="jobs-filters" id="radarTheme">
+                            <button type="button" class="chip-filter is-active" data-radar-theme-filter="all">Tous</button>
+                            <button type="button" class="chip-filter" data-radar-theme-filter="saas">SaaS</button>
+                            <button type="button" class="chip-filter" data-radar-theme-filter="devtools">Devtools</button>
+                            <button type="button" class="chip-filter" data-radar-theme-filter="ai">IA</button>
+                            <button type="button" class="chip-filter" data-radar-theme-filter="automation">Auto</button>
+                        </div>
+                        <md-outlined-button type="button" id="radarRefresh">
+                            <md-icon slot="icon">refresh</md-icon>
+                            Recalculer
+                        </md-outlined-button>
+                    </div>
+                </header>
+                <div class="jobs-layout radar-layout">
+                    <div id="radarList" class="jobs-list radar-list" data-testid="radar-list">
+                        <p class="feed-empty">Chargement du radar...</p>
+                    </div>
+                    <aside id="radarDetail" class="jobs-detail radar-detail">
+                        <p class="feed-empty">Selectionne une idee pour voir le detail.</p>
+                        <div id="radarPackHost"></div>
                     </aside>
                 </div>
             </section>
@@ -3298,6 +3418,6 @@
         </div>
     </div>
 
-    <script type="module" src="/js/main.js?v=20260722trends1"></script>
+    <script type="module" src="/js/main.js?v=20260722radar1"></script>
 </body>
 </html>

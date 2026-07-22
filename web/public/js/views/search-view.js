@@ -109,5 +109,6 @@ function defaultActions() {
         { id: 'scroll-sites', label: 'Voir les sources', hint: 'Sites analyses', icon: 'fa-globe', keywords: ['sources', 'sites'] },
         { id: 'go-jobs', label: 'Suivre les jobs', hint: 'Crawl, enrich, NLP', icon: 'fa-briefcase', keywords: ['jobs', 'crawl'] },
         { id: 'go-tendances', label: 'Voir les tendances', hint: 'Sujets qui montent', icon: 'fa-chart-line', keywords: ['tendances', 'trends', 'hot'] },
+        { id: 'go-radar', label: 'Ouvrir le radar idees', hint: 'Opportunites SaaS / IT', icon: 'fa-bullseye', keywords: ['radar', 'idees', 'saas', 'opportunite'] },
     ];
 }

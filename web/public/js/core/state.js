@@ -5,7 +5,7 @@ import { bus } from './bus.js';
 import { defaultSettings } from '../models/settings.js';
 
 export const state = {
-    view: 'feed',           // feed | favoris | sources | jobs | tendances | settings
+    view: 'feed',           // feed | favoris | sources | jobs | tendances | radar | settings
     feedMode: 'all',        // all | favorites
     sites: [],
     articles: [],
@@ -18,6 +18,10 @@ export const state = {
     trendsDays: 30,
     trendsKind: 'all',
     selectedTrendTerm: null,
+    radarIdeas: [],
+    radarDays: 30,
+    radarTheme: 'all',
+    selectedRadarTheme: null,
     settings: { ...defaultSettings() },
     currentAnalysisId: null,
     pendingVictorySiteId: null,

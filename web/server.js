@@ -240,6 +240,48 @@ app.post('/api/trends/refresh', async (req, res) => {
     }
 });
 
+app.get('/api/radar', async (req, res) => {
+    try {
+        const response = await axios.get(`${ANALYZER_URL}/radar`, {
+            timeout: 60000,
+            params: {
+                days: req.query.days || 30,
+                limit: req.query.limit || 40,
+                theme: req.query.theme || 'all',
+                ...(req.query.refresh ? { refresh: req.query.refresh } : {}),
+            },
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur radar:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors du chargement du radar',
+            details: error.message,
+        });
+    }
+});
+
+app.post('/api/radar/refresh', async (req, res) => {
+    try {
+        const response = await axios.post(`${ANALYZER_URL}/radar/refresh`, null, {
+            timeout: 90000,
+            params: {
+                days: req.query.days || req.body?.days || 30,
+                limit: req.query.limit || req.body?.limit || 40,
+            },
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur refresh radar:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors du calcul du radar',
+            details: error.message,
+        });
+    }
+});
+
 app.post('/api/sites/:id/ingest-articles', async (req, res) => {
     try {
         const response = await axios.post(

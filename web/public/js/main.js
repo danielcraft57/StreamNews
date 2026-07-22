@@ -25,6 +25,7 @@ import * as searchView from './views/search-view.js';
 import * as feedChips from './views/feed-chips.js';
 import * as searchService from './services/search.js';
 import * as trendsView from './views/trends-view.js';
+import * as radarView from './views/radar-view.js';
 import * as chips from './ui/chips.js';
 
 window.SN = {
@@ -54,6 +55,7 @@ window.SN = {
     feedChips,
     searchService,
     trendsView,
+    radarView,
     chips,
 };
 
