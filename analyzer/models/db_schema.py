@@ -289,3 +289,20 @@ article_meta_norm = Table(
     Column("domain", String(255)),
     Column("extra", JsonDocument, nullable=False, server_default="{}"),
 )
+
+trends = Table(
+    "trends",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("term", String(500), nullable=False),
+    Column("kind", String(50), nullable=False, server_default="keyword"),
+    Column("label", String(50)),
+    Column("score", Float, nullable=False, server_default="0"),
+    Column("article_count", Integer, nullable=False, server_default="0"),
+    Column("window_days", Integer, nullable=False, server_default="7"),
+    Column("site_id", Integer),
+    Column("computed_at", DateTime, server_default=func.now()),
+    Column("sample_titles", Text),
+    Index("idx_trends_window_score", "window_days", "score"),
+    Index("idx_trends_term", "term"),
+)

@@ -322,3 +322,103 @@ class ArticlesRepository:
                 base.update(rel[int(row["id"])])
                 out.append(ArticleRecord(**base))
             return out
+
+    async def search(
+        self,
+        query: str,
+        *,
+        site_id: Optional[int] = None,
+        limit: int = 40,
+    ) -> List[ArticleRecord]:
+        """Recherche texte simple (titre / resume / contenu)."""
+        q = (query or "").strip()
+        if len(q) < 2:
+            return []
+        limit = max(1, min(int(limit or 40), 100))
+        like = f"%{q}%"
+        order = (
+            "ORDER BY published_at DESC, fetched_at DESC"
+            if self.is_sqlite
+            else "ORDER BY published_at DESC NULLS LAST, fetched_at DESC"
+        )
+        cols = (
+            "id, site_id, feed_id, feed_url, title, link, summary, author, "
+            "published_at, guid, fetched_at, enrich_status, enrich_error, enriched_at, "
+            "analysis_status, analysis_error, analyzed_at"
+        )
+        async with self.pool.acquire() as conn:
+            if not await has_normalized_tables(conn, is_sqlite=self.is_sqlite):
+                return []
+            if site_id:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT {cols}
+                    FROM articles
+                    WHERE site_id = $1
+                      AND (
+                        title LIKE $2 COLLATE NOCASE
+                        OR IFNULL(summary, '') LIKE $2 COLLATE NOCASE
+                        OR IFNULL(content_text, '') LIKE $2 COLLATE NOCASE
+                        OR IFNULL(author, '') LIKE $2 COLLATE NOCASE
+                      )
+                    {order}
+                    LIMIT $3
+                    """
+                    if self.is_sqlite
+                    else f"""
+                    SELECT {cols}
+                    FROM articles
+                    WHERE site_id = $1
+                      AND (
+                        title ILIKE $2
+                        OR COALESCE(summary, '') ILIKE $2
+                        OR COALESCE(content_text, '') ILIKE $2
+                        OR COALESCE(author, '') ILIKE $2
+                      )
+                    {order}
+                    LIMIT $3
+                    """,
+                    site_id,
+                    like,
+                    limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT {cols}
+                    FROM articles
+                    WHERE (
+                        title LIKE $1 COLLATE NOCASE
+                        OR IFNULL(summary, '') LIKE $1 COLLATE NOCASE
+                        OR IFNULL(content_text, '') LIKE $1 COLLATE NOCASE
+                        OR IFNULL(author, '') LIKE $1 COLLATE NOCASE
+                      )
+                    {order}
+                    LIMIT $2
+                    """
+                    if self.is_sqlite
+                    else f"""
+                    SELECT {cols}
+                    FROM articles
+                    WHERE (
+                        title ILIKE $1
+                        OR COALESCE(summary, '') ILIKE $1
+                        OR COALESCE(content_text, '') ILIKE $1
+                        OR COALESCE(author, '') ILIKE $1
+                      )
+                    {order}
+                    LIMIT $2
+                    """,
+                    like,
+                    limit,
+                )
+            if not rows:
+                return []
+            ids = [int(r["id"]) for r in rows]
+            rel = await _load_relations(conn, ids, with_analyses=False)
+            out: List[ArticleRecord] = []
+            for row in rows:
+                base = _row_base(dict(row))
+                base.update(rel[int(row["id"])])
+                out.append(ArticleRecord(**base))
+            return out

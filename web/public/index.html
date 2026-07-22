@@ -5,7 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StreamNews - Analyseur de Flux RSS</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Source+Sans+3:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL@24,400,0..1&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/css/tokens.css">
     <style>
         * {
             margin: 0;
@@ -850,79 +854,2450 @@
                 font-size: 2rem;
             }
         }
+            /* --- Refonte Console (maquette 01) --- */
+            :root{
+                --ink:#0b1f33;
+                --ink-soft:#3a4f63;
+                --teal:#0d9488;
+                --teal-deep:#0f766e;
+                --amber:#d97706;
+                --surface:#f4f6f8;
+                --panel:#ffffff;
+                --line:#d5dde5;
+                --radius:6px;
+                --sidebar:260px;
+            }
+
+            body{
+                background: var(--surface);
+                color: var(--ink);
+            }
+
+            .app-shell{
+                display:grid;
+                grid-template-columns: var(--sidebar) 1fr;
+                min-height: 100vh;
+            }
+
+            .sidebar{
+                background: var(--ink);
+                color: #e8eef4;
+                padding: 18px 14px;
+                display:flex;
+                flex-direction:column;
+                gap: 18px;
+                min-width: 240px;
+            }
+
+            .sidebar-brand{
+                font-family: Georgia, "Times New Roman", serif;
+                font-weight: 700;
+                letter-spacing: -0.02em;
+                font-size: 1.35rem;
+                padding: 6px 8px;
+                display:flex;
+                align-items:center;
+                gap: 10px;
+            }
+
+            .sidebar-brand i{
+                color: var(--teal);
+            }
+
+            .sidebar-nav{
+                display:flex;
+                flex-direction:column;
+                gap: 16px;
+            }
+
+            .sidebar-nav-group{
+                display:flex;
+                flex-direction:column;
+                gap: 8px;
+            }
+
+            .sidebar-nav-title{
+                font-size: 0.72rem;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                color: #8fa3b5;
+                padding: 0 8px;
+            }
+
+            .sidebar-nav-item{
+                width:100%;
+                text-align:left;
+                border: 0;
+                background: transparent;
+                color: #c5d2de;
+                padding: 10px 10px;
+                border-radius: var(--radius);
+                cursor:pointer;
+                font-weight: 600;
+            }
+
+            .sidebar-nav-item:hover{
+                background: rgba(255,255,255,0.06);
+                color:#fff;
+            }
+
+            .sidebar-nav-item.is-active{
+                background: var(--teal);
+                color:#fff;
+            }
+
+            .sidebar-panels{
+                display:flex;
+                flex-direction:column;
+                gap: 14px;
+                overflow:auto;
+                padding-bottom: 6px;
+                max-height: calc(100vh - 220px);
+            }
+
+            .sidebar .card{
+                background: rgba(255,255,255,0.06);
+                border: 1px solid rgba(255,255,255,0.12);
+                box-shadow:none;
+                border-radius: var(--radius);
+                padding: 14px 14px;
+            }
+
+            .sidebar .card h2{
+                color: #e8eef4;
+                margin-bottom: 12px;
+                font-size: 1rem;
+                font-weight: 700;
+            }
+
+            .sidebar .form-group label{
+                color: #c5d2de;
+                font-weight: 600;
+            }
+
+            .sidebar .form-group input,
+            .sidebar .form-group select{
+                border-color: rgba(255,255,255,0.14);
+                background: rgba(255,255,255,0.94);
+            }
+
+            .sidebar .status{
+                margin-bottom: 14px;
+            }
+
+            .sidebar .btn{
+                background: var(--teal);
+                background-image: none;
+                color:#fff;
+            }
+
+            .sidebar .btn:hover{
+                background: var(--teal-deep);
+                transform:none;
+                box-shadow:none;
+            }
+
+            .sidebar .btn-stop{
+                background: #fff;
+            }
+
+            .main{
+                padding: 18px 18px 24px;
+                display:flex;
+                flex-direction:column;
+                gap: 14px;
+                min-width: 0;
+            }
+
+            .topbar{
+                display:flex;
+                align-items:center;
+                justify-content:space-between;
+                gap: 12px;
+            }
+
+            .search-trigger{
+                display:flex;
+                align-items:center;
+                gap: 10px;
+                border: 1px solid var(--line);
+                border-radius: var(--radius);
+                padding: 10px 12px;
+                background: var(--panel);
+                cursor:pointer;
+                min-width: 320px;
+            }
+
+            .search-trigger kbd{
+                margin-left:auto;
+                font-size:0.75rem;
+                border: 1px solid var(--line);
+                border-radius: 4px;
+                padding: 2px 6px;
+                background: #fff;
+            }
+
+            .results-wrap{
+                flex: 1;
+                min-height: 0;
+                display:flex;
+            }
+
+            #resultsCard{
+                width: 100%;
+                border-radius: var(--radius);
+                background: var(--panel);
+                border: 1px solid var(--line);
+                box-shadow:none;
+                padding: 18px;
+                overflow:hidden;
+            }
+
+            #results{
+                min-height: 0;
+            }
+
+            .results-empty{
+                width:100%;
+                border: 1px dashed var(--line);
+                background: rgba(255,255,255,0.7);
+                border-radius: var(--radius);
+                padding: 24px;
+                color: var(--ink-soft);
+                display:flex;
+                align-items:flex-start;
+                justify-content:space-between;
+                gap: 16px;
+            }
+
+            .results-empty strong{
+                color: var(--ink);
+            }
+
+            /* Harmonisation UI globale (bouts / cards / shadows) */
+            .card{
+                background: #fff;
+                border-radius: var(--radius);
+                box-shadow: none;
+                transition:none;
+                border: 1px solid var(--line);
+            }
+
+            .card:hover{
+                transform:none;
+            }
+
+            .btn{
+                background: var(--teal);
+                border: 0;
+                border-radius: var(--radius);
+                color:#fff;
+                box-shadow:none;
+                background-image:none;
+                transition:none;
+                width: 100%;
+            }
+
+            .btn:hover{
+                transform:none;
+                background: var(--teal-deep);
+                box-shadow:none;
+            }
+
+            .btn:disabled{
+                opacity:0.6;
+                cursor:not-allowed;
+                transform:none;
+            }
+
+            .btn-delete{
+                background:#fff;
+                border-radius: var(--radius);
+                border: 1px solid rgba(180,57,43,0.9);
+                color: rgba(180,57,43,0.95);
+                box-shadow:none;
+            }
+
+            .btn-delete:hover{
+                background: rgba(180,57,43,0.06);
+            }
+
+            .articles-layout{
+                display:grid;
+                grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.25fr);
+                gap: 16px;
+                margin-top: 14px;
+                align-items:start;
+            }
+
+            .articles-list-pane{
+                max-height: 70vh;
+                overflow-y:auto;
+                background: #fff;
+                border-radius: var(--radius);
+                border: 1px solid var(--line);
+                padding: 12px;
+            }
+
+            .articles-list-pane .section-title{
+                font-size: 0.9rem;
+                font-weight: 800;
+                margin: 6px 6px 10px;
+                color: var(--ink);
+            }
+
+            .articles-list-pane .section-subtitle{
+                font-size: 0.8rem;
+                font-weight: 800;
+                margin: 12px 6px 10px;
+                color: var(--teal);
+                letter-spacing: 0.02em;
+            }
+
+            /* On garde la classe .rss-feed pour les feeds + items,
+               mais on rend les items "ligne" style console */
+            .articles-list-pane .article-item{
+                padding: 10px;
+                border: 0;
+                border-radius: 8px;
+                background: transparent;
+                box-shadow:none;
+                margin-bottom: 8px;
+            }
+
+            .articles-list-pane .article-item:hover{
+                background: rgba(13,148,136,0.06);
+            }
+
+            .articles-list-pane .article-item.is-selected{
+                background: rgba(13,148,136,0.10);
+                border: 1px solid rgba(13,148,136,0.25);
+                box-shadow:none;
+            }
+
+            .article-reader{
+                background: var(--surface);
+                border: 1px solid var(--line);
+                border-radius: var(--radius);
+                box-shadow:none;
+                max-height: 70vh;
+                padding: 18px;
+            }
+
+            .reader-badge-row{
+                margin-bottom: 12px;
+            }
+
+            body{
+                font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+            }
+
+            .sidebar-brand{
+                font-family: Fraunces, Georgia, "Times New Roman", serif;
+            }
+
+            .topbar-context{
+                color: var(--ink-soft);
+                font-weight: 700;
+                font-size: 0.9rem;
+                white-space: nowrap;
+            }
+
+            .site-header{
+                padding-bottom: 14px;
+                border-bottom: 1px solid var(--line);
+                margin-bottom: 14px;
+            }
+
+            .site-header-title{
+                margin: 0 0 4px;
+                font-family: Fraunces, Georgia, serif;
+                font-size: 1.35rem;
+                line-height: 1.25;
+            }
+
+            .site-header-url{
+                margin: 0;
+                font-size: 0.9rem;
+            }
+
+            .site-header-url a{
+                color: var(--teal-deep);
+                text-decoration: none;
+            }
+
+            .site-header-url a:hover{
+                text-decoration: underline;
+            }
+
+            .site-header-aside{
+                text-align: right;
+                flex-shrink: 0;
+            }
+
+            .site-header-date{
+                color: var(--ink-soft);
+                font-size: 0.85rem;
+                margin-top: 6px;
+            }
+
+            .site-header-desc{
+                margin: 10px 0 0;
+                color: var(--ink-soft);
+                line-height: 1.5;
+            }
+
+            .site-header-og{
+                margin-top: 12px;
+            }
+
+            .site-header-og img{
+                max-width: 100%;
+                max-height: 160px;
+                border-radius: var(--radius);
+            }
+
+            .site-metrics{
+                margin-top: 12px;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 18px;
+            }
+
+            .site-metric-value{
+                font-weight: 800;
+                font-size: 1.15rem;
+                color: var(--ink);
+            }
+
+            .site-metric-label{
+                color: var(--ink-soft);
+                font-size: 0.85rem;
+            }
+
+            .site-actions{
+                margin-top: 14px;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+                align-items: center;
+            }
+
+            .site-actions .btn,
+            .site-actions .btn-delete{
+                width: auto;
+                padding: 10px 14px;
+                font-size: 14px;
+            }
+
+            .site-actions .btn-delete{
+                padding: 8px 12px;
+                font-size: 13px;
+            }
+
+            .feed-item-chips{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                margin-top: 6px;
+            }
+
+            .feed-chip{
+                font-size: 0.72rem;
+                font-weight: 600;
+                padding: 2px 7px;
+                border-radius: 4px;
+                background: #fff7ed;
+                color: var(--amber);
+                border: 1px solid #fde68a;
+            }
+
+            .feed-chip.teal{
+                background: #ecfdf8;
+                color: var(--teal-deep);
+                border-color: #99f6e4;
+            }
+
+            .sidebar .site-item{
+                background: rgba(255,255,255,0.06);
+                border-color: rgba(255,255,255,0.12);
+            }
+
+            .sidebar .site-item:hover{
+                background: rgba(255,255,255,0.10);
+            }
+
+            .sidebar .site-item.is-viewing{
+                border-color: rgba(13,148,136,0.55);
+                box-shadow: inset 3px 0 0 var(--teal);
+            }
+
+            .sidebar .site-item h4{
+                color: #e8eef4;
+            }
+
+            .sidebar .site-url,
+            .sidebar .site-desc,
+            .sidebar .site-info .date{
+                color: #a8b8c6;
+            }
+
+            .article-reader h3,
+            .reader-header h3{
+                font-family: Fraunces, Georgia, serif;
+            }
+
+            .reader-analysis-panel{
+                background: #f0fdfa;
+                border-color: #99f6e4;
+            }
+
+            .reader-analysis-section > .reader-section-label{
+                color: var(--teal-deep);
+            }
+
+            .article-item.is-selected{
+                border-color: rgba(13,148,136,0.25);
+                background: rgba(13,148,136,0.10);
+                box-shadow: inset 3px 0 0 var(--teal);
+            }
+
+            .spinner{
+                border-top-color: var(--teal);
+            }
+
+            .search-overlay{
+                position: fixed;
+                inset: 0;
+                background: rgba(11, 31, 51, 0.45);
+                display: none;
+                align-items: flex-start;
+                justify-content: center;
+                padding-top: 12vh;
+                z-index: 50;
+            }
+
+            .search-overlay.open{
+                display: flex;
+            }
+
+            .search-palette{
+                width: min(560px, 92vw);
+                background: var(--panel);
+                border-radius: 8px;
+                border: 1px solid var(--line);
+                overflow: hidden;
+                box-shadow: 0 18px 40px rgba(11, 31, 51, 0.18);
+                max-height: min(70vh, 560px);
+                display: flex;
+                flex-direction: column;
+            }
+
+            .search-palette-input-row{
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 14px 16px;
+                border-bottom: 1px solid var(--line);
+            }
+
+            .search-palette-input-row > i{
+                color: var(--ink-soft);
+            }
+
+            .search-palette-input-row input{
+                flex: 1;
+                border: 0;
+                padding: 4px 0;
+                font-size: 1.05rem;
+                outline: none;
+                background: transparent;
+                color: var(--ink);
+            }
+
+            .search-kbd{
+                font-size: 0.72rem;
+                font-weight: 600;
+                color: var(--ink-soft);
+                border: 1px solid var(--line);
+                border-radius: 4px;
+                padding: 3px 6px;
+                background: #f8fafc;
+            }
+
+            .search-results{
+                overflow: auto;
+                padding-bottom: 8px;
+            }
+
+            .search-hint{
+                margin: 12px 16px;
+                color: var(--ink-soft);
+                font-size: 0.9rem;
+            }
+
+            .search-palette-section{
+                padding: 12px 14px 4px;
+                font-size: 0.72rem;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                color: var(--ink-soft);
+            }
+
+            .search-hit{
+                width: 100%;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                text-align: left;
+                border: 0;
+                background: transparent;
+                padding: 10px 14px;
+                cursor: pointer;
+                color: var(--ink);
+            }
+
+            .search-hit:hover,
+            .search-hit.is-active,
+            .search-hit:focus{
+                background: #e6f5f3;
+                outline: none;
+            }
+
+            .search-hit-icon{
+                width: 28px;
+                height: 28px;
+                border-radius: 6px;
+                background: #f0fdfa;
+                color: var(--teal-deep);
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+            }
+
+            .search-hit-body{
+                flex: 1;
+                min-width: 0;
+                display: grid;
+                gap: 2px;
+            }
+
+            .search-hit-body strong{
+                font-weight: 600;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .search-hit kbd{
+                font-size: 0.72rem;
+                color: var(--ink-soft);
+                border: 1px solid var(--line);
+                border-radius: 4px;
+                padding: 2px 5px;
+            }
+
+            .reader-back{
+                display: none;
+                margin-bottom: 12px;
+                border: 1px solid var(--line);
+                background: var(--panel);
+                color: var(--ink);
+                border-radius: var(--radius);
+                padding: 8px 12px;
+                font-weight: 600;
+                cursor: pointer;
+            }
+
+            @media (max-width: 980px){
+                .app-shell{ grid-template-columns: 1fr; }
+                .sidebar{ position: sticky; top:0; z-index: 5; }
+                .sidebar-panels{ max-height: none; }
+                .main{ padding: 12px; }
+                .topbar{
+                    flex-wrap: wrap;
+                }
+                .search-trigger{
+                    min-width: unset;
+                    flex: 1;
+                }
+                .topbar-context{
+                    width: 100%;
+                }
+                #resultsCard{ padding: 12px; }
+                .articles-layout{ grid-template-columns: 1fr; }
+                .article-reader{ position: static; max-height: unset; }
+                .articles-list-pane{ max-height: unset; }
+                .articles-layout.show-reader .articles-list-pane{ display: none; }
+                .articles-layout.show-reader .reader-back{ display: inline-flex; align-items: center; gap: 8px; }
+                .site-header .site-title-row{
+                    flex-direction: column;
+                    align-items: flex-start;
+                }
+                .site-header-aside{
+                    text-align: left;
+                    margin-top: 8px;
+                }
+            }
+
+            /* --- Maquette Feed + Lecteur (3 colonnes) --- */
+            .app-shell.mockup{
+                display: grid;
+                grid-template-columns: 220px 1fr;
+                min-height: 100vh;
+                background: var(--surface);
+            }
+
+            .app-shell.mockup .sidebar{
+                background: var(--panel);
+                color: var(--ink);
+                border-right: 1px solid var(--line);
+                padding: 20px 12px;
+                display: flex;
+                flex-direction: column;
+                gap: 24px;
+                min-height: 100vh;
+            }
+
+            .app-shell.mockup .sidebar-brand{
+                font-family: Fraunces, Georgia, serif;
+                font-size: 1.25rem;
+                font-weight: 700;
+                color: var(--ink);
+                padding: 4px 10px;
+            }
+
+            .app-shell.mockup .sidebar-brand i{ display: none; }
+
+            .app-shell.mockup .sidebar-nav-title{
+                color: #94a3b8;
+            }
+
+            .app-shell.mockup .sidebar-nav-item{
+                color: var(--ink-soft);
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 9px 10px;
+                font-weight: 600;
+            }
+
+            .app-shell.mockup .sidebar-nav-item i{
+                width: 18px;
+                text-align: center;
+                color: #94a3b8;
+            }
+
+            .app-shell.mockup .sidebar-nav-item:hover{
+                background: #f1f5f9;
+                color: var(--ink);
+            }
+
+            .app-shell.mockup .sidebar-nav-item.is-active{
+                background: #ecfdf8;
+                color: var(--teal-deep);
+                box-shadow: inset 3px 0 0 var(--teal);
+            }
+
+            .app-shell.mockup .sidebar-nav-item.is-active i{
+                color: var(--teal);
+            }
+
+            .app-shell.mockup .sidebar-user{
+                margin-top: auto;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 10px;
+                border-top: 1px solid var(--line);
+            }
+
+            .app-shell.mockup .sidebar-user-avatar{
+                width: 36px;
+                height: 36px;
+                border-radius: 50%;
+                background: var(--ink);
+                color: #fff;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 0.8rem;
+                font-weight: 700;
+                flex-shrink: 0;
+            }
+
+            .app-shell.mockup .sidebar-user-name{
+                font-weight: 700;
+                font-size: 0.9rem;
+            }
+
+            .app-shell.mockup .sidebar-user-email{
+                font-size: 0.75rem;
+                color: var(--ink-soft);
+            }
+
+            .app-shell.mockup .workspace{
+                display: grid;
+                grid-template-columns: minmax(300px, 0.95fr) minmax(360px, 1.25fr);
+                min-height: 100vh;
+                min-width: 0;
+            }
+
+            .app-shell.mockup .workspace.view-sources,
+            .app-shell.mockup .workspace.view-jobs,
+            .app-shell.mockup .workspace.view-settings,
+            .app-shell.mockup .workspace.view-tendances{
+                grid-template-columns: 1fr;
+            }
+
+            .app-shell.mockup .feed-pane,
+            .app-shell.mockup .reader-pane{
+                background: var(--panel);
+                min-height: 0;
+                min-width: 0;
+            }
+
+            .app-shell.mockup .feed-pane{
+                border-right: 1px solid var(--line);
+                display: flex;
+                flex-direction: column;
+            }
+
+            .app-shell.mockup .feed-header{
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 18px 20px 12px;
+                border-bottom: 0;
+                gap: 12px;
+            }
+
+            .app-shell.mockup .feed-header h1{
+                font-size: 1.35rem;
+                font-weight: 800;
+                margin: 0;
+            }
+
+            .app-shell.mockup .feed-header-tools{
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-wrap: wrap;
+                justify-content: flex-end;
+            }
+
+            .app-shell.mockup .feed-tool-btn{
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                border: 1px solid var(--line);
+                background: var(--panel);
+                color: var(--ink);
+                border-radius: var(--radius);
+                padding: 8px 12px;
+                font-size: 0.85rem;
+                font-weight: 600;
+                cursor: pointer;
+            }
+
+            .app-shell.mockup .feed-tool-btn:hover{
+                border-color: #99f6e4;
+                background: #f0fdfa;
+                color: var(--teal-deep);
+            }
+
+            .app-shell.mockup .feed-tool-btn i{
+                font-size: 0.85rem;
+            }
+
+            .app-shell.mockup .feed-source-bar{
+                padding: 0 16px 12px;
+                border-bottom: 1px solid var(--line);
+            }
+
+            .app-shell.mockup .feed-source-chips{
+                display: flex;
+                gap: 8px;
+                overflow-x: auto;
+                padding-bottom: 2px;
+                scrollbar-width: thin;
+            }
+
+            .app-shell.mockup .source-chip{
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                flex: 0 0 auto;
+                border: 1px solid var(--line);
+                background: var(--panel);
+                color: var(--ink-soft);
+                border-radius: 999px;
+                padding: 6px 12px 6px 8px;
+                font-size: 0.8rem;
+                font-weight: 600;
+                cursor: pointer;
+            }
+
+            .app-shell.mockup .source-chip:hover{
+                border-color: #99f6e4;
+                color: var(--teal-deep);
+            }
+
+            .app-shell.mockup .source-chip.is-active{
+                border-color: #5eead4;
+                background: #ecfdf8;
+                color: var(--teal-deep);
+                box-shadow: inset 0 0 0 1px rgba(13,148,136,0.15);
+            }
+
+            .app-shell.mockup .source-chip-fav{
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                object-fit: cover;
+                background: #f1f5f9;
+            }
+
+            .app-shell.mockup .source-chip-fav-fallback{
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 0.7rem;
+                font-weight: 700;
+                color: var(--teal-deep);
+                background: #ecfdf8;
+            }
+
+            .app-shell.mockup .feed-filter{
+                border: 1px solid var(--line);
+                border-radius: var(--radius);
+                padding: 7px 10px;
+                font-size: 0.85rem;
+                background: var(--panel);
+                color: var(--ink);
+            }
+
+            .search-hit mark{
+                background: #fef3c7;
+                color: inherit;
+                padding: 0 2px;
+                border-radius: 2px;
+            }
+
+            .app-shell.mockup .feed-list{
+                overflow-y: auto;
+                flex: 1;
+            }
+
+            .app-shell.mockup .feed-row{
+                display: grid;
+                grid-template-columns: 72px 1fr;
+                gap: 14px;
+                width: 100%;
+                text-align: left;
+                border: 0;
+                border-bottom: 1px solid var(--line);
+                background: transparent;
+                padding: 14px 18px;
+                cursor: pointer;
+            }
+
+            .app-shell.mockup .feed-row:hover{
+                background: #f8fafc;
+            }
+
+            .app-shell.mockup .feed-row.is-selected{
+                background: #ecfdf8;
+                box-shadow: inset 3px 0 0 var(--teal);
+            }
+
+            .app-shell.mockup .feed-row-thumb{
+                width: 72px;
+                height: 72px;
+                border-radius: var(--radius);
+                overflow: hidden;
+                background: #e2e8f0;
+                flex-shrink: 0;
+            }
+
+            .app-shell.mockup .feed-row-thumb img{
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                display: block;
+            }
+
+            .app-shell.mockup .feed-row-meta{
+                display: flex;
+                justify-content: space-between;
+                gap: 8px;
+                font-size: 0.8rem;
+                margin-bottom: 4px;
+            }
+
+            .app-shell.mockup .feed-source{
+                color: var(--teal);
+                font-weight: 700;
+            }
+
+            .app-shell.mockup .feed-time{
+                color: #94a3b8;
+                white-space: nowrap;
+            }
+
+            .app-shell.mockup .feed-row-title{
+                font-size: 0.95rem;
+                font-weight: 700;
+                line-height: 1.35;
+                margin: 0 0 8px;
+                color: var(--ink);
+            }
+
+            .app-shell.mockup .feed-chip{
+                background: transparent;
+                color: var(--teal-deep);
+                border: 1px solid #99f6e4;
+            }
+
+            .app-shell.mockup .reader-pane{
+                overflow-y: auto;
+                padding: 0;
+                background: var(--surface);
+            }
+
+            .app-shell.mockup .article-reader{
+                max-height: none;
+                border: 0;
+                border-radius: 0;
+                background: transparent;
+                padding: 0;
+            }
+
+            .app-shell.mockup .reader-toolbar{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 16px;
+                padding: 14px 24px;
+                background: var(--panel);
+                border-bottom: 1px solid var(--line);
+            }
+
+            .app-shell.mockup .reader-toolbar button{
+                border: 0;
+                background: transparent;
+                color: var(--ink-soft);
+                font-weight: 600;
+                font-size: 0.85rem;
+                cursor: pointer;
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+            }
+
+            .app-shell.mockup .reader-toolbar button:hover{
+                color: var(--teal);
+            }
+
+            .app-shell.mockup .reader-toolbar button.is-on{
+                color: var(--teal);
+            }
+
+            .app-shell.mockup .feed-row.is-read .feed-row-title{
+                color: var(--ink-soft);
+                font-weight: 500;
+            }
+
+            .app-shell.mockup .feed-row.is-favorite .feed-row-meta::before{
+                content: "★ ";
+                color: var(--amber);
+            }
+
+            .app-shell.mockup .reader-content{
+                padding: 20px 28px 40px;
+            }
+
+            .app-shell.mockup .reader-source-line{
+                color: var(--teal);
+                font-weight: 700;
+                font-size: 0.9rem;
+                margin-bottom: 10px;
+            }
+
+            .app-shell.mockup .reader-source-line span{
+                color: #94a3b8;
+                font-weight: 500;
+            }
+
+            .app-shell.mockup .reader-title{
+                font-family: Fraunces, Georgia, serif;
+                font-size: clamp(1.5rem, 2.2vw, 2rem);
+                font-weight: 800;
+                line-height: 1.15;
+                letter-spacing: -0.02em;
+                text-transform: uppercase;
+                margin: 0 0 20px;
+                color: var(--ink);
+            }
+
+            .app-shell.mockup .reader-summary-box{
+                background: #f0fdfa;
+                border: 1px solid #99f6e4;
+                border-radius: 8px;
+                padding: 16px 18px;
+                margin-bottom: 20px;
+            }
+
+            .app-shell.mockup .reader-summary-box strong{
+                display: block;
+                color: var(--teal-deep);
+                font-size: 0.75rem;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                margin-bottom: 8px;
+            }
+
+            .app-shell.mockup .reader-entities-title{
+                font-size: 0.75rem;
+                font-weight: 800;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                color: var(--teal-deep);
+                margin-bottom: 10px;
+            }
+
+            .app-shell.mockup .reader-entities-row{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+                margin-bottom: 22px;
+            }
+
+            .app-shell.mockup .entity-pill{
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px 12px;
+                border-radius: 999px;
+                border: 1px solid var(--line);
+                background: var(--panel);
+                font-size: 0.85rem;
+                font-weight: 600;
+            }
+
+            .app-shell.mockup .entity-pill.per{ border-color: #fdba74; background: #fff7ed; color: #c2410c; }
+            .app-shell.mockup .entity-pill.org{ border-color: #99f6e4; background: #ecfdf8; color: var(--teal-deep); }
+            .app-shell.mockup .entity-pill.loc{ border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; }
+
+            .app-shell.mockup .entity-pill small{
+                font-size: 0.65rem;
+                font-weight: 700;
+                opacity: 0.75;
+                text-transform: uppercase;
+            }
+
+            .app-shell.mockup .sources-pane{
+                padding: 24px;
+                overflow-y: auto;
+                background: var(--panel);
+            }
+
+            .app-shell.mockup .sources-pane .card{
+                max-width: 720px;
+                margin-bottom: 20px;
+            }
+
+            .app-shell.mockup .sources-pane h2{
+                color: var(--ink);
+            }
+
+            .app-shell.mockup .feed-empty,
+            .app-shell.mockup .reader-empty-state{
+                padding: 24px;
+                color: var(--ink-soft);
+                line-height: 1.5;
+            }
+
+            .app-shell.mockup .status-toast{
+                position: fixed;
+                bottom: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                z-index: 90;
+                max-width: min(520px, 92vw);
+                margin: 0;
+                box-shadow: 0 8px 24px rgba(11,31,51,0.12);
+            }
+
+            .app-shell.mockup .feed-chip{
+                background: transparent;
+                color: var(--teal-deep);
+                border: 1px solid #5eead4;
+                border-radius: 999px;
+                padding: 2px 10px;
+                font-size: 0.72rem;
+                font-weight: 600;
+                text-transform: none;
+            }
+
+            .app-shell.mockup .feed-filter{
+                max-width: 200px;
+            }
+
+            .app-shell.mockup .sources-pane[hidden],
+            .app-shell.mockup .jobs-pane[hidden],
+            .app-shell.mockup .settings-pane[hidden],
+            .app-shell.mockup .trends-pane[hidden]{
+                display: none !important;
+            }
+
+            .app-shell.mockup .workspace.view-sources .feed-pane,
+            .app-shell.mockup .workspace.view-sources .reader-pane,
+            .app-shell.mockup .workspace.view-jobs .feed-pane,
+            .app-shell.mockup .workspace.view-jobs .reader-pane,
+            .app-shell.mockup .workspace.view-settings .feed-pane,
+            .app-shell.mockup .workspace.view-settings .reader-pane,
+            .app-shell.mockup .workspace.view-tendances .feed-pane,
+            .app-shell.mockup .workspace.view-tendances .reader-pane{
+                display: none !important;
+            }
+
+            .app-shell.mockup .trend-row{
+                width: 100%;
+                text-align: left;
+                border: 0;
+                border-bottom: 1px solid var(--line);
+                background: transparent;
+                padding: 14px 16px;
+                cursor: pointer;
+                display: grid;
+                gap: 6px;
+            }
+
+            .app-shell.mockup .trend-row:hover,
+            .app-shell.mockup .trend-row.is-selected{
+                background: #f0fdfa;
+            }
+
+            .app-shell.mockup .trend-row-top{
+                display: flex;
+                justify-content: space-between;
+                gap: 10px;
+                align-items: center;
+            }
+
+            .app-shell.mockup .trend-term{
+                color: var(--ink);
+                font-size: 0.98rem;
+                text-transform: capitalize;
+            }
+
+            .app-shell.mockup .trend-kind{
+                font-size: 0.72rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                color: var(--teal-deep);
+                background: #ecfdf8;
+                border-radius: 999px;
+                padding: 3px 8px;
+            }
+
+            .app-shell.mockup .trend-row-meta{
+                display: flex;
+                gap: 12px;
+                font-size: 0.78rem;
+                color: var(--ink-soft);
+            }
+
+            .app-shell.mockup .trend-bar{
+                height: 6px;
+                border-radius: 999px;
+                background: #e2e8f0;
+                overflow: hidden;
+            }
+
+            .app-shell.mockup .trend-bar span{
+                display: block;
+                height: 100%;
+                background: var(--teal);
+                border-radius: 999px;
+            }
+
+            .app-shell.mockup .trend-sample{
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .app-shell.mockup .trends-samples h4{
+                margin: 0 0 8px;
+                font-size: 0.85rem;
+                color: var(--ink-soft);
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+            }
+
+            .app-shell.mockup .trends-samples ul{
+                margin: 0 0 16px;
+                padding-left: 18px;
+                color: var(--ink);
+            }
+
+            .app-shell.mockup .trends-pane,
+            .app-shell.mockup .jobs-pane{
+                padding: 24px 28px 32px;
+                overflow: auto;
+            }
+
+            .app-shell.mockup .pane-header{
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 16px;
+                margin-bottom: 20px;
+            }
+
+            .app-shell.mockup .pane-header h1{
+                margin: 0;
+                font-size: 1.6rem;
+                color: var(--ink);
+            }
+
+            .app-shell.mockup .pane-sub{
+                margin: 4px 0 0;
+                color: var(--ink-soft);
+                font-size: 0.9rem;
+            }
+
+            .app-shell.mockup .feed-header{
+                align-items: flex-start;
+            }
+
+            .app-shell.mockup .btn-primary{
+                background: var(--teal);
+                border-color: var(--teal);
+                color: #fff;
+                font-weight: 700;
+            }
+
+            .app-shell.mockup .btn-primary:hover{
+                background: var(--teal-deep);
+                border-color: var(--teal-deep);
+            }
+
+            .app-shell.mockup .pane-header .btn,
+            .app-shell.mockup .settings-actions .btn,
+            .app-shell.mockup .sources-empty .btn{
+                width: auto;
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 10px 16px;
+            }
+
+            .app-shell.mockup .sources-empty{
+                max-width: 420px;
+                margin: 40px auto;
+            }
+
+            .app-shell.mockup .btn-block{
+                width: 100%;
+            }
+
+            .app-shell.mockup .btn-ghost{
+                background: transparent;
+                border: 1px solid var(--line);
+                color: var(--ink-soft);
+            }
+
+            .app-shell.mockup .sources-pane,
+            .app-shell.mockup .jobs-pane,
+            .app-shell.mockup .settings-pane{
+                padding: 24px 28px 40px;
+                overflow-y: auto;
+                background: var(--surface);
+            }
+
+            .app-shell.mockup .sources-list .site-item{
+                background: var(--panel);
+                border: 1px solid var(--line);
+                border-radius: var(--radius);
+                padding: 16px 18px;
+                margin-bottom: 12px;
+            }
+
+            .app-shell.mockup .sources-list .site-item-header{
+                display: flex;
+                justify-content: space-between;
+                gap: 12px;
+                align-items: flex-start;
+            }
+
+            .app-shell.mockup .sources-list .btn-delete{
+                font-size: 0.75rem;
+                padding: 6px 10px;
+                opacity: 0.55;
+            }
+
+            .app-shell.mockup .source-row{
+                display: grid;
+                grid-template-columns: minmax(180px, 1.4fr) auto auto minmax(220px, 1.6fr);
+                gap: 14px;
+                align-items: center;
+                background: var(--panel);
+                border: 1px solid var(--line);
+                border-radius: var(--radius);
+                padding: 14px 16px;
+                margin-bottom: 10px;
+            }
+
+            .app-shell.mockup .source-row.is-viewing{
+                border-color: #99f6e4;
+                background: #f0fdfa;
+            }
+
+            .app-shell.mockup .source-row-identity{
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                border: 0;
+                background: transparent;
+                text-align: left;
+                cursor: pointer;
+                padding: 0;
+                min-width: 0;
+            }
+
+            .app-shell.mockup .source-favicon,
+            .app-shell.mockup .source-favicon-fallback{
+                width: 36px;
+                height: 36px;
+                border-radius: 8px;
+                flex-shrink: 0;
+                object-fit: cover;
+                border: 1px solid var(--line);
+            }
+
+            .app-shell.mockup .source-favicon-fallback{
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                background: #ecfdf8;
+                color: var(--teal-deep);
+                font-weight: 700;
+            }
+
+            .app-shell.mockup .source-row-text{
+                display: grid;
+                gap: 2px;
+                min-width: 0;
+            }
+
+            .app-shell.mockup .source-row-text strong{
+                color: var(--ink);
+                font-size: 0.95rem;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .app-shell.mockup .source-row-host{
+                color: var(--ink-soft);
+                font-size: 0.8rem;
+            }
+
+            .app-shell.mockup .source-status{
+                font-size: 0.78rem;
+                font-weight: 700;
+                padding: 4px 8px;
+                border-radius: 999px;
+                border: 1px solid var(--line);
+                color: var(--ink-soft);
+                white-space: nowrap;
+            }
+
+            .app-shell.mockup .source-status.ok{
+                background: #ecfdf5;
+                border-color: #a7f3d0;
+                color: #047857;
+            }
+
+            .app-shell.mockup .source-status.running{
+                background: #ecfdf8;
+                border-color: #99f6e4;
+                color: var(--teal-deep);
+            }
+
+            .app-shell.mockup .source-status.error{
+                background: #fff7ed;
+                border-color: #fed7aa;
+                color: #c2410c;
+            }
+
+            .app-shell.mockup .source-row-stats{
+                display: flex;
+                gap: 10px;
+                color: var(--ink-soft);
+                font-size: 0.82rem;
+                white-space: nowrap;
+            }
+
+            .app-shell.mockup .source-row-actions{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                justify-content: flex-end;
+                align-items: center;
+            }
+
+            .app-shell.mockup .source-row-actions md-outlined-button{
+                --md-outlined-button-container-height: 32px;
+                --md-outlined-button-label-text-size: 0.78rem;
+            }
+
+
+            .app-shell.mockup .btn-icon-danger{
+                border: 0;
+                background: transparent;
+                color: #94a3b8;
+                cursor: pointer;
+                padding: 8px;
+                margin-left: 4px;
+            }
+
+            .app-shell.mockup .btn-icon-danger:hover{
+                color: #c2410c;
+            }
+
+            .app-shell.mockup .jobs-detail-title{
+                margin: 6px 0 14px;
+                color: var(--ink);
+                font-size: 1.15rem;
+            }
+
+            .app-shell.mockup .jobs-detail-grid{
+                display: grid;
+                gap: 10px;
+                margin: 0 0 16px;
+            }
+
+            .app-shell.mockup .jobs-detail-grid dt{
+                font-size: 0.72rem;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                color: var(--ink-soft);
+                margin-bottom: 2px;
+            }
+
+            .app-shell.mockup .jobs-detail-grid dd{
+                margin: 0;
+                color: var(--ink);
+                font-weight: 600;
+            }
+
+            .app-shell.mockup .btn-block{
+                width: 100%;
+            }
+
+            .app-shell.mockup .settings-row{
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 4px;
+            }
+
+            .app-shell.mockup .settings-row span{
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+
+            .app-shell.mockup .settings-help{
+                margin: 0 0 0 26px;
+                font-size: 0.8rem;
+                color: var(--ink-soft);
+                font-weight: 400;
+                line-height: 1.4;
+            }
+
+            @media (max-width: 1100px){
+                .app-shell.mockup .source-row{
+                    grid-template-columns: 1fr;
+                    gap: 10px;
+                }
+                .app-shell.mockup .source-row-actions{
+                    justify-content: flex-start;
+                }
+            }
+
+            .app-shell.mockup .chip-filter{
+                border: 1px solid var(--line);
+                background: var(--panel);
+                color: var(--ink-soft);
+                border-radius: 999px;
+                padding: 6px 12px;
+                font-size: 0.8rem;
+                font-weight: 600;
+                cursor: pointer;
+            }
+
+            .app-shell.mockup .chip-filter.is-active{
+                border-color: #99f6e4;
+                background: #ecfdf8;
+                color: var(--teal-deep);
+            }
+
+            .app-shell.mockup .jobs-filters{
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+
+            .app-shell.mockup .jobs-header-tools{
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                flex-wrap: wrap;
+                justify-content: flex-end;
+            }
+
+            .app-shell.mockup .jobs-layout{
+                display: grid;
+                grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+                gap: 16px;
+                min-height: 420px;
+            }
+
+            .app-shell.mockup .jobs-list,
+            .app-shell.mockup .jobs-detail{
+                background: var(--panel);
+                border: 1px solid var(--line);
+                border-radius: var(--radius);
+                overflow: auto;
+            }
+
+            .app-shell.mockup .job-row{
+                width: 100%;
+                text-align: left;
+                border: 0;
+                border-bottom: 1px solid var(--line);
+                background: transparent;
+                padding: 14px 16px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+            }
+
+            .app-shell.mockup .job-row:hover,
+            .app-shell.mockup .job-row.is-selected{
+                background: #f0fdfa;
+            }
+
+            .app-shell.mockup .job-row-main{
+                display: flex;
+                align-items: flex-start;
+                gap: 12px;
+                flex: 1;
+                min-width: 0;
+            }
+
+            .app-shell.mockup .job-row-text{
+                display: grid;
+                gap: 3px;
+                min-width: 0;
+                flex: 1;
+            }
+
+            .app-shell.mockup .job-row-title{
+                color: var(--ink);
+                font-size: 0.95rem;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .app-shell.mockup .job-row-chevron{
+                color: #94a3b8;
+                flex-shrink: 0;
+            }
+
+            .app-shell.mockup .job-type-icon{
+                width: 34px;
+                height: 34px;
+                border-radius: 8px;
+                background: #ecfdf8;
+                color: var(--teal);
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+            }
+
+            .app-shell.mockup .job-type-icon-lg{
+                width: 44px;
+                height: 44px;
+                font-size: 1.1rem;
+            }
+
+            .app-shell.mockup .job-row-top{
+                display: flex;
+                justify-content: space-between;
+                gap: 10px;
+                align-items: center;
+            }
+
+            .app-shell.mockup .job-type{
+                font-size: 0.72rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                color: var(--teal-deep);
+                margin: 0;
+            }
+
+            .app-shell.mockup .job-status-badge{
+                font-size: 0.72rem;
+                font-weight: 700;
+                border-radius: 999px;
+                padding: 3px 8px;
+                background: #f1f5f9;
+                color: var(--ink-soft);
+            }
+
+            .app-shell.mockup .job-status-badge.running{
+                background: #ecfdf8;
+                color: var(--teal-deep);
+            }
+
+            .app-shell.mockup .job-status-badge.done{
+                background: #ecfdf5;
+                color: #15803d;
+            }
+
+            .app-shell.mockup .job-status-badge.error{
+                background: #fff7ed;
+                color: #c2410c;
+            }
+
+            .app-shell.mockup .job-status{
+                font-size: 0.78rem;
+                font-weight: 600;
+                color: var(--ink-soft);
+            }
+
+            .app-shell.mockup .job-status.running{ color: var(--teal); }
+            .app-shell.mockup .job-status.done{ color: #15803d; }
+            .app-shell.mockup .job-status.error{ color: #c2410c; }
+
+            .app-shell.mockup .jobs-detail{
+                padding: 18px;
+            }
+
+            .app-shell.mockup .jobs-detail-head{
+                display: flex;
+                gap: 14px;
+                align-items: flex-start;
+                margin-bottom: 16px;
+            }
+
+            .app-shell.mockup .jobs-progress-block{
+                margin: 0 0 16px;
+            }
+
+            .app-shell.mockup .jobs-progress-label{
+                display: flex;
+                justify-content: space-between;
+                font-size: 0.8rem;
+                color: var(--ink-soft);
+                margin-bottom: 6px;
+            }
+
+            .app-shell.mockup .jobs-progress-track{
+                height: 8px;
+                border-radius: 999px;
+                background: #e2e8f0;
+                overflow: hidden;
+            }
+
+            .app-shell.mockup .jobs-progress-fill{
+                height: 100%;
+                background: var(--teal);
+                border-radius: 999px;
+                transition: width 0.25s ease;
+            }
+
+            .app-shell.mockup .jobs-progress-fill.is-indeterminate{
+                width: 40%;
+                animation: sn-progress-slide 1.2s ease-in-out infinite;
+            }
+
+            @keyframes sn-progress-slide{
+                0%{ transform: translateX(-100%); }
+                100%{ transform: translateX(280%); }
+            }
+
+            .app-shell.mockup .jobs-open-source{
+                width: 100%;
+                margin-top: 4px;
+            }
+
+            .app-shell.mockup .favoris-empty{
+                padding: 28px 18px;
+                text-align: center;
+            }
+
+            .app-shell.mockup .favoris-empty-icon{
+                width: 48px;
+                height: 48px;
+                margin: 0 auto 12px;
+                border-radius: 50%;
+                background: #ecfdf8;
+                color: var(--teal);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 1.2rem;
+            }
+
+            .app-shell.mockup .settings-version{
+                margin: 18px 0 0;
+                font-size: 0.78rem;
+                color: var(--ink-soft);
+            }
+
+            .app-shell.mockup .settings-form{
+                max-width: 640px;
+            }
+
+            .app-shell.mockup .settings-block{
+                background: var(--panel);
+                border: 1px solid var(--line);
+                border-radius: var(--radius);
+                padding: 18px 20px;
+                margin-bottom: 14px;
+            }
+
+            .app-shell.mockup .settings-block h2{
+                margin: 0 0 12px;
+                font-size: 1rem;
+                color: var(--ink);
+            }
+
+            .app-shell.mockup .settings-row{
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin: 10px 0;
+                color: var(--ink);
+                font-weight: 500;
+            }
+
+            .app-shell.mockup .settings-danger .btn-ghost{
+                margin-top: 8px;
+                color: #b45309;
+                border-color: #fde68a;
+            }
+
+            .app-shell.mockup .settings-actions{
+                margin-top: 8px;
+            }
+
+            .modal-overlay{
+                position: fixed;
+                inset: 0;
+                background: rgba(11, 31, 51, 0.45);
+                display: none;
+                align-items: center;
+                justify-content: center;
+                z-index: 80;
+                padding: 20px;
+            }
+
+            .modal-overlay.open{
+                display: flex !important;
+            }
+
+            .modal-card{
+                position: relative;
+                width: min(520px, 100%);
+                background: var(--panel, #fff);
+                border: 1px solid var(--line, #e2e8f0);
+                border-radius: 10px;
+                padding: 28px 28px 22px;
+                box-shadow: 0 20px 50px rgba(11,31,51,0.18);
+            }
+
+            .sn-add-source-card .sn-add-source-actions{
+                display: flex;
+                justify-content: flex-end;
+                margin-top: 4px;
+            }
+
+            .sn-add-source-card md-outlined-text-field,
+            .sn-add-source-card md-filled-button,
+            .sn-add-source-card md-linear-progress{
+                width: 100%;
+            }
+
+            .sn-add-source-card .sn-add-source-actions md-filled-button{
+                width: auto;
+                min-width: 140px;
+            }
+
+            .sn-add-source-stop{
+                margin-top: 12px;
+                display: flex;
+                justify-content: center;
+            }
+
+            .sn-add-source-stop md-outlined-button{
+                width: auto;
+            }
+
+            #results,
+            #resultsCard{
+                display: none !important;
+            }
+
+            .modal-close{
+                position: absolute;
+                top: 12px;
+                right: 14px;
+                border: 0;
+                background: transparent;
+                font-size: 1.4rem;
+                color: var(--ink-soft, #64748b);
+                cursor: pointer;
+                line-height: 1;
+            }
+
+            .modal-card h2{
+                margin: 0 0 6px;
+                color: var(--ink, #0b1f33);
+                font-size: 1.35rem;
+            }
+
+            .modal-lead{
+                margin: 0 0 18px;
+                color: var(--ink-soft, #64748b);
+                line-height: 1.45;
+            }
+
+            .modal-hint{
+                margin: 14px 0 0;
+                font-size: 0.78rem;
+                color: var(--ink-soft, #94a3b8);
+                text-align: center;
+            }
+
+            .advanced-options{
+                margin: 0 0 14px;
+                border: 1px solid var(--line, #e2e8f0);
+                border-radius: 6px;
+                padding: 8px 12px;
+                background: var(--surface, #f8fafc);
+            }
+
+            .advanced-options summary{
+                cursor: pointer;
+                font-weight: 600;
+                color: var(--ink-soft, #64748b);
+                font-size: 0.88rem;
+            }
+
+            .advanced-options[open] summary{
+                margin-bottom: 10px;
+            }
+
+            .add-source-loading{
+                margin-top: 16px;
+                padding-top: 12px;
+                border-top: 1px solid var(--line, #e2e8f0);
+                text-align: center;
+            }
+
+            .add-source-progress-bar{
+                height: 6px;
+                background: #e2e8f0;
+                border-radius: 999px;
+                overflow: hidden;
+                margin-bottom: 12px;
+            }
+
+            .add-source-progress-bar span{
+                display: block;
+                height: 100%;
+                width: 8%;
+                background: var(--teal, #0d9488);
+                transition: width 0.25s ease;
+            }
+
+            .add-source-victory{
+                margin-top: 16px;
+                padding: 14px;
+                border-radius: 8px;
+                background: #ecfdf8;
+                border: 1px solid #99f6e4;
+            }
+
+            .victory-title{
+                margin: 0 0 4px;
+                font-weight: 700;
+                color: var(--teal-deep, #0f766e);
+            }
+
+            body.dense-feed .app-shell.mockup .feed-row{
+                padding: 10px 14px;
+            }
+
+            body.dense-feed .app-shell.mockup .feed-row-title{
+                font-size: 0.9rem;
+            }
+
+            .app-shell.mockup .sources-empty{
+                text-align: center;
+                padding: 40px 20px;
+            }
+
+            .app-shell.mockup .sources-empty .btn{
+                margin-top: 12px;
+            }
+
+            @media (max-width: 900px){
+                .app-shell.mockup .jobs-layout{
+                    grid-template-columns: 1fr;
+                }
+            }
+
+            .app-shell.mockup .feed-row-thumb-fallback{
+                display: block;
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
+            }
+
+            .app-shell.mockup .site-actions-row{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin-top: 12px;
+            }
+
+            .app-shell.mockup .site-actions-row .btn{
+                width: auto;
+                padding: 8px 12px;
+                font-size: 0.85rem;
+            }
+
+            .app-shell.mockup .site-stats{
+                display: flex;
+                gap: 12px;
+                margin-top: 8px;
+                color: var(--ink-soft);
+                font-size: 0.85rem;
+            }
+
+            .app-shell.mockup .site-title-row[role="button"]{
+                cursor: pointer;
+            }
+
+            .app-shell.mockup .feed-row-title{
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+            }
+
+            .app-shell.mockup .reader-body{
+                font-size: 1.02rem;
+                line-height: 1.7;
+                color: #1e293b;
+            }
+
+            .app-shell.mockup .reader-body p{
+                margin-bottom: 1em;
+            }
+
+            .app-shell.mockup .reader-summary-box p{
+                margin: 0 0 0.6em;
+                line-height: 1.55;
+                color: #334155;
+            }
+
+            .app-shell.mockup .reader-summary-box p:last-child{
+                margin-bottom: 0;
+            }
+
+            .app-shell.mockup .reader-hero{
+                margin: 0 0 18px;
+                border-radius: 8px;
+                overflow: hidden;
+            }
+
+            .app-shell.mockup .reader-hero img{
+                width: 100%;
+                max-height: 280px;
+                object-fit: cover;
+                display: block;
+            }
+
+            .app-shell.mockup .feed-row-thumb img{
+                background: #e2e8f0;
+            }
+
+            .app-shell.mockup .sources-pane .site-item{
+                background: #f8fafc;
+                border: 1px solid var(--line);
+            }
+
+            .app-shell.mockup .sources-pane .site-item h4{
+                color: var(--ink);
+            }
+
+            .app-shell.mockup .sources-pane .site-url,
+            .app-shell.mockup .sources-pane .site-desc{
+                color: var(--ink-soft);
+            }
+
+            .app-shell.mockup .reader-back{ display: none; }
+
+            @media (max-width: 980px){
+                .app-shell.mockup{
+                    grid-template-columns: 1fr;
+                }
+                .app-shell.mockup .workspace{
+                    grid-template-columns: 1fr;
+                }
+                .app-shell.mockup .workspace.show-reader .feed-pane{ display: none; }
+                .app-shell.mockup .reader-back{
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    margin: 12px 16px 0;
+                }
+            }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1><i class="fas fa-rss"></i> StreamNews</h1>
-            <p>Analyseur intelligent de flux RSS</p>
-        </div>
+    <div class="app-shell mockup">
+        <div id="status" class="status status-toast" data-testid="status"></div>
+        <aside class="sidebar">
+            <div class="sidebar-brand">StreamNews</div>
 
-        <div class="main-content">
-            <!-- Formulaire d'analyse -->
-            <div class="card">
-                <h2><i class="fas fa-search"></i> Analyser un site</h2>
-                
-                <div id="status" class="status" data-testid="status"></div>
-                
-                <form id="analyzeForm" data-testid="analyze-form">
-                    <div class="form-group">
-                        <label for="url">URL du site à analyser</label>
-                        <input type="url" id="url" name="url" data-testid="url-input" placeholder="https://example.com" required>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="maxPages">Maximum de pages (plafond)</label>
-                        <select id="maxPages" name="maxPages" data-testid="max-pages">
-                            <option value="25">25 pages max</option>
-                            <option value="50" selected>50 pages max</option>
-                            <option value="100">100 pages max</option>
-                            <option value="200">200 pages max</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="depth">Profondeur de crawl</label>
-                        <select id="depth" name="depth" data-testid="depth">
-                            <option value="2">2 niveaux</option>
-                            <option value="3" selected>3 niveaux</option>
-                            <option value="4">4 niveaux</option>
-                            <option value="5">5 niveaux</option>
-                        </select>
-                    </div>
-                    
-                    <button type="submit" class="btn" id="analyzeBtn" data-testid="analyze-btn">
-                        <i class="fas fa-play"></i> Lancer l'analyse
+            <nav class="sidebar-nav">
+                <div class="sidebar-nav-group">
+                    <div class="sidebar-nav-title">Lire</div>
+                    <button type="button" class="sidebar-nav-item is-active" data-nav="feed">
+                        <i class="fas fa-newspaper"></i> Feed
                     </button>
+                    <button type="button" class="sidebar-nav-item" data-nav="favoris">
+                        <i class="fas fa-star"></i> Favoris
+                    </button>
+                </div>
+                <div class="sidebar-nav-group">
+                    <div class="sidebar-nav-title">Analyser</div>
+                    <button type="button" class="sidebar-nav-item" data-nav="sources">
+                        <i class="fas fa-database"></i> Sources
+                    </button>
+                    <button type="button" class="sidebar-nav-item" data-nav="jobs">
+                        <i class="fas fa-briefcase"></i> Jobs
+                    </button>
+                    <button type="button" class="sidebar-nav-item" data-nav="tendances">
+                        <i class="fas fa-chart-line"></i> Tendances
+                    </button>
+                </div>
+                <div class="sidebar-nav-group">
+                    <div class="sidebar-nav-title">Compte</div>
+                    <button type="button" class="sidebar-nav-item" data-nav="settings">
+                        <i class="fas fa-cog"></i> Reglages
+                    </button>
+                </div>
+            </nav>
+
+            <div class="sidebar-user">
+                <div class="sidebar-user-avatar">AD</div>
+                <div>
+                    <div class="sidebar-user-name">Alexandre D.</div>
+                    <div class="sidebar-user-email">alexandre@streamnews.fr</div>
+                </div>
+            </div>
+        </aside>
+
+        <div class="workspace" id="workspace">
+            <section class="feed-pane" id="feedPane">
+                <header class="feed-header">
+                    <div class="feed-header-copy">
+                        <h1 id="feedTitle">Feed</h1>
+                        <p class="pane-sub" id="feedSubtitle">Tous tes articles, toutes sources confondues</p>
+                    </div>
+                    <div class="feed-header-tools">
+                        <button type="button" class="feed-tool-btn" id="openSearch" title="Rechercher (Ctrl+K)">
+                            <i class="fas fa-search" aria-hidden="true"></i>
+                            <span>Rechercher</span>
+                        </button>
+                        <button type="button" class="feed-tool-btn" id="feedRefresh" title="Actualiser le feed">
+                            <i class="fas fa-sync-alt" aria-hidden="true"></i>
+                            <span>Actualiser</span>
+                        </button>
+                        <md-filled-button type="button" id="openAddSourceFromFeed" title="Ajouter une source">
+                            <md-icon slot="icon">add</md-icon>
+                            Source
+                        </md-filled-button>
+                        <select class="feed-filter" id="feedFilter" hidden aria-hidden="true">
+                            <option value="all">Tous les articles</option>
+                        </select>
+                    </div>
+                </header>
+                <div class="feed-source-bar" id="feedSourceBar" aria-label="Filtrer par source">
+                    <div class="feed-source-chips" id="feedSourceChips"></div>
+                </div>
+                <div class="feed-list" id="feedList" data-testid="articles-list">
+                    <p class="feed-empty">Chargement du feed...</p>
+                </div>
+            </section>
+
+            <section class="reader-pane" id="readerPane">
+                <div class="article-reader empty reader-empty-state" id="articleReader" data-testid="article-reader">
+                    Selectionne un article dans le feed pour le lire ici.
+                </div>
+            </section>
+
+            <section class="sources-pane" id="sourcesPane" hidden>
+                <header class="pane-header">
+                    <div>
+                        <h1>Sources</h1>
+                        <p class="pane-sub">Sites analyses et leurs flux RSS</p>
+                    </div>
+                    <md-filled-button type="button" id="openAddSource" data-testid="open-add-source">
+                        <md-icon slot="icon">add</md-icon>
+                        Ajouter une source
+                    </md-filled-button>
+                </header>
+                <div id="sitesList" class="sites-list sources-list" data-testid="sites-list">
+                    <p class="feed-empty">Chargement des sites...</p>
+                </div>
+            </section>
+
+            <section class="jobs-pane" id="jobsPane" hidden>
+                <header class="pane-header">
+                    <div>
+                        <h1>Jobs</h1>
+                        <p class="pane-sub">Suivez crawl, enrichissement et analyse NLP</p>
+                    </div>
+                    <div class="jobs-header-tools">
+                        <div class="jobs-filters" id="jobsFilters">
+                            <button type="button" class="chip-filter is-active" data-jobs-filter="all">Tous</button>
+                            <button type="button" class="chip-filter" data-jobs-filter="running">En cours</button>
+                            <button type="button" class="chip-filter" data-jobs-filter="done">Termines</button>
+                        </div>
+                        <md-outlined-button type="button" id="jobsRefresh">
+                            <md-icon slot="icon">refresh</md-icon>
+                            Actualiser
+                        </md-outlined-button>
+                    </div>
+                </header>
+                <div class="jobs-layout">
+                    <div id="jobsList" class="jobs-list" data-testid="jobs-list">
+                        <p class="feed-empty">Aucun job pour le moment.</p>
+                    </div>
+                    <aside id="jobsDetail" class="jobs-detail">
+                        <p class="feed-empty">Selectionne un job pour voir le detail.</p>
+                    </aside>
+                </div>
+            </section>
+
+            <section class="trends-pane" id="trendsPane" hidden>
+                <header class="pane-header">
+                    <div>
+                        <h1>Tendances</h1>
+                        <p class="pane-sub" id="trendsSubtitle">Sujets qui ressortent de tes articles</p>
+                    </div>
+                    <div class="jobs-header-tools">
+                        <div class="jobs-filters" id="trendsWindow">
+                            <button type="button" class="chip-filter" data-trends-days="7">7 j</button>
+                            <button type="button" class="chip-filter is-active" data-trends-days="30">30 j</button>
+                            <button type="button" class="chip-filter" data-trends-days="90">90 j</button>
+                        </div>
+                        <div class="jobs-filters" id="trendsKind">
+                            <button type="button" class="chip-filter is-active" data-trends-kind="all">Tous</button>
+                            <button type="button" class="chip-filter" data-trends-kind="keyword">Mots-cles</button>
+                            <button type="button" class="chip-filter" data-trends-kind="entity">Entites</button>
+                            <button type="button" class="chip-filter" data-trends-kind="yake">YAKE</button>
+                        </div>
+                        <md-outlined-button type="button" id="trendsRefresh">
+                            <md-icon slot="icon">refresh</md-icon>
+                            Recalculer
+                        </md-outlined-button>
+                    </div>
+                </header>
+                <div class="jobs-layout trends-layout">
+                    <div id="trendsList" class="jobs-list trends-list" data-testid="trends-list">
+                        <p class="feed-empty">Chargement des tendances...</p>
+                    </div>
+                    <aside id="trendsDetail" class="jobs-detail trends-detail">
+                        <p class="feed-empty">Selectionne une tendance pour voir le detail.</p>
+                    </aside>
+                </div>
+            </section>
+
+            <section class="settings-pane" id="settingsPane" hidden>
+                <header class="pane-header">
+                    <div>
+                        <h1>Reglages</h1>
+                        <p class="pane-sub">Preferences locales sur cet appareil</p>
+                    </div>
+                </header>
+                <form id="settingsForm" class="settings-form" data-testid="settings-form">
+                    <section class="settings-block">
+                        <h2>1. Lecture</h2>
+                        <div class="md-row-switch">
+                            <div>
+                                <div class="label">Marquer comme lu a l'ouverture</div>
+                                <p class="help">Les articles ouverts passent en lu sans clic.</p>
+                            </div>
+                            <md-switch data-setting="autoMarkRead" aria-label="Marquer comme lu a l'ouverture"></md-switch>
+                        </div>
+                        <div class="md-row-switch">
+                            <div>
+                                <div class="label">Afficher le resume IA en premier</div>
+                                <p class="help">Le resume reste au-dessus du corps de l'article.</p>
+                            </div>
+                            <md-switch data-setting="showSummaryFirst" selected aria-label="Afficher le resume IA en premier"></md-switch>
+                        </div>
+                        <div class="md-row-switch">
+                            <div>
+                                <div class="label">Liste feed plus dense</div>
+                                <p class="help">Moins d'espace entre les lignes du feed.</p>
+                            </div>
+                            <md-switch data-setting="denseList" aria-label="Liste feed plus dense"></md-switch>
+                        </div>
+                    </section>
+                    <section class="settings-block">
+                        <h2>2. Analyse</h2>
+                        <div class="md-row-switch">
+                            <div>
+                                <div class="label">Enrichir automatiquement apres import</div>
+                                <p class="help">Telecharge le contenu complet des nouveaux articles.</p>
+                            </div>
+                            <md-switch data-setting="autoEnrich" selected aria-label="Enrichir automatiquement"></md-switch>
+                        </div>
+                        <div class="md-row-switch">
+                            <div>
+                                <div class="label">Celebrer la premiere source</div>
+                                <p class="help">Dialog de victoire apres le premier crawl (Peak-End).</p>
+                            </div>
+                            <md-switch data-setting="celebrateFirst" selected aria-label="Celebrer la premiere source"></md-switch>
+                        </div>
+                    </section>
+                    <section class="settings-block">
+                        <h2>3. Notifications</h2>
+                        <div class="md-row-switch">
+                            <div>
+                                <div class="label">Afficher les toasts de statut</div>
+                                <p class="help">Feedback discret en bas d'ecran.</p>
+                            </div>
+                            <md-switch data-setting="toasts" selected aria-label="Afficher les toasts"></md-switch>
+                        </div>
+                    </section>
+                    <section class="settings-block settings-danger">
+                        <h2>4. Donnees</h2>
+                        <p class="pane-sub">Le cache local (favoris, lus, prefs) reste sur ton navigateur. Delete loin du CTA principal.</p>
+                        <md-text-button id="clearLocalCache" type="button">Vider le cache local</md-text-button>
+                    </section>
+                    <div class="settings-actions">
+                        <md-filled-button type="submit">Enregistrer</md-filled-button>
+                    </div>
+                    <p class="settings-version">StreamNews · prefs locales sur cet appareil</p>
                 </form>
-                
-                <div id="loading" class="loading" style="display: none;" data-testid="loading">
-                    <div class="spinner"></div>
-                    <p>Analyse en cours...</p>
-                    <button type="button" class="btn-stop" id="stopAnalyzeBtn" data-testid="stop-analyze-btn">
-                        Arrêter l'analyse
-                    </button>
-                </div>
-            </div>
-
-            <!-- Liste des sites analysés -->
-            <div class="card">
-                <h2><i class="fas fa-list"></i> Sites analysés</h2>
-                
-                <div id="sitesList" class="sites-list" data-testid="sites-list">
-                    <p>Chargement des sites...</p>
-                </div>
-            </div>
+            </section>
         </div>
 
-        <!-- Résultats détaillés -->
-        <div class="card" id="resultsCard" style="display: none;" data-testid="results-card">
-            <h2><i class="fas fa-chart-bar"></i> Résultats de l'analyse</h2>
-            <div id="results" data-testid="results"></div>
+        <div id="results" data-testid="results" hidden></div>
+        <div id="resultsCard" data-testid="results-card" hidden></div>
+    </div>
+
+    <div class="modal-overlay" id="addSourceModal" hidden>
+        <div class="modal-card sn-add-source-card" role="dialog" aria-modal="true" aria-labelledby="addSourceTitle">
+            <button type="button" class="modal-close" id="closeAddSource" aria-label="Fermer">&times;</button>
+            <h2 id="addSourceTitle">Ajouter une source</h2>
+            <p class="modal-lead">Colle une URL. On trouve les flux RSS et on prepare les resumes.</p>
+
+            <form id="analyzeForm" data-testid="analyze-form">
+                <div class="md-field-stack">
+                    <md-outlined-text-field
+                        id="url"
+                        name="url"
+                        label="URL du site"
+                        type="url"
+                        required
+                        autocomplete="url"
+                        placeholder="https://exemple.com"
+                        data-testid="url-input"
+                        style="width:100%"
+                    ></md-outlined-text-field>
+                    <details class="advanced-options">
+                        <summary>Options avancees</summary>
+                        <div class="form-group">
+                            <label for="maxPages">Maximum de pages</label>
+                            <select id="maxPages" name="maxPages" data-testid="max-pages">
+                                <option value="25">25 pages max</option>
+                                <option value="50" selected>50 pages max</option>
+                                <option value="100">100 pages max</option>
+                                <option value="200">200 pages max</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="depth">Profondeur de crawl</label>
+                            <select id="depth" name="depth" data-testid="depth">
+                                <option value="2">2 niveaux</option>
+                                <option value="3" selected>3 niveaux</option>
+                                <option value="4">4 niveaux</option>
+                                <option value="5">5 niveaux</option>
+                            </select>
+                        </div>
+                    </details>
+                </div>
+
+                <div id="addSourceActions" class="sn-add-source-actions">
+                    <md-filled-button type="button" id="analyzeBtn" data-testid="analyze-btn">Analyser</md-filled-button>
+                </div>
+            </form>
+
+            <div id="addSourceProgress" hidden data-testid="loading">
+                <md-linear-progress id="addSourceProgressBar" indeterminate></md-linear-progress>
+                <p id="addSourceProgressLabel">Analyse en cours...</p>
+                <div class="sn-add-source-stop">
+                    <md-outlined-button type="button" id="stopAnalyzeBtn" data-testid="stop-analyze-btn">Arreter</md-outlined-button>
+                </div>
+            </div>
+
+            <div id="addSourceVictory" class="add-source-victory" hidden>
+                <p class="victory-title">Source prete</p>
+                <p id="addSourceVictoryText" class="pane-sub"></p>
+                <md-filled-button type="button" id="addSourceReadFirst" style="width:100%">Lire le premier article</md-filled-button>
+            </div>
+
+            <p class="modal-hint">Astuce : Ctrl+K → Ajouter une source</p>
         </div>
     </div>
 
-    <script src="app.js?v=20260720a"></script>
+    <!-- Compat legacy progress fill -->
+    <div id="loading" hidden aria-hidden="true"></div>
+    <span id="addSourceProgressFill" hidden></span>
+    <div id="addSourceDialog" hidden aria-hidden="true"></div>
+
+    <div class="search-overlay" id="searchOverlay" role="dialog" aria-modal="true" aria-label="Recherche">
+        <div class="search-palette">
+            <div class="search-palette-input-row">
+                <i class="fas fa-search" aria-hidden="true"></i>
+                <input id="searchInput" type="search" placeholder="Rechercher un article, une source, une action…" autocomplete="off">
+                <kbd class="search-kbd">Ctrl K</kbd>
+            </div>
+            <div id="searchResults" class="search-results"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/js/main.js?v=20260722trends1"></script>
 </body>
-</html> 
+</html>

@@ -212,6 +212,80 @@ async def get_site_articles(site_id: int, limit: int = 100):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/articles/search")
+async def search_articles(q: str = "", site_id: int | None = None, limit: int = 40):
+    """Recherche full-text simple dans les articles importes."""
+    try:
+        query = (q or "").strip()
+        if len(query) < 2:
+            return {"query": query, "articles": [], "count": 0}
+        limit = max(1, min(limit, 100))
+        articles = await db.search_articles(query, site_id=site_id, limit=limit)
+        return {"query": query, "articles": articles, "count": len(articles)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/trends")
+async def get_trends(
+    days: int = 30,
+    site_id: int | None = None,
+    kind: str = "all",
+    limit: int = 40,
+    refresh: bool = False,
+):
+    """Tendances calculees (mots-cles, entites, YAKE) stockees en BDD."""
+    try:
+        from services.trends_service import TrendsService
+
+        svc = TrendsService(db)
+        days = max(1, min(days, 365))
+        if refresh:
+            data = await svc.refresh(window_days=days, site_id=site_id, limit=limit)
+            if kind and kind != "all":
+                data["trends"] = [t for t in data["trends"] if t.get("kind") == kind]
+                data["count"] = len(data["trends"])
+                data["kind"] = kind
+            else:
+                data["kind"] = "all"
+            return data
+
+        data = await svc.list_stored(
+            window_days=days, site_id=site_id, kind=kind, limit=limit
+        )
+        if not data["trends"]:
+            refreshed = await svc.refresh(window_days=days, site_id=site_id, limit=limit)
+            if kind and kind != "all":
+                refreshed["trends"] = [
+                    t for t in refreshed["trends"] if t.get("kind") == kind
+                ]
+                refreshed["count"] = len(refreshed["trends"])
+                refreshed["kind"] = kind
+            else:
+                refreshed["kind"] = "all"
+            return refreshed
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/trends/refresh")
+async def refresh_trends(
+    days: int = 30,
+    site_id: int | None = None,
+    limit: int = 50,
+):
+    """Recalcule et persiste les tendances."""
+    try:
+        from services.trends_service import TrendsService
+
+        svc = TrendsService(db)
+        return await svc.refresh(window_days=days, site_id=site_id, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/sites/{site_id}/ingest-articles")
 async def ingest_site_articles(site_id: int):
     """Re-parse les flux deja detectes et (re)importe les articles."""

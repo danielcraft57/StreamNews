@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StreamNews — maquette Sources</title>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #0b1f33;
+      --ink-soft: #3a4f63;
+      --teal: #0d9488;
+      --teal-deep: #0f766e;
+      --surface: #f4f6f8;
+      --panel: #fff;
+      --line: #e2e8f0;
+      --radius: 6px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Source Sans 3", system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--surface);
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+    }
+    .sidebar {
+      background: #eef2f5;
+      border-right: 1px solid var(--line);
+      padding: 20px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .brand { font-weight: 700; font-size: 1.15rem; padding: 0 8px; }
+    .nav-title {
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #94a3b8;
+      margin: 10px 8px 6px;
+    }
+    .nav-item {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 9px 10px;
+      border-radius: var(--radius);
+      color: var(--ink-soft);
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .nav-item.active {
+      background: #ecfdf8;
+      color: var(--teal-deep);
+      box-shadow: inset 3px 0 0 var(--teal);
+    }
+    .main { padding: 28px 32px; }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 22px;
+    }
+    h1 { margin: 0; font-size: 1.8rem; }
+    .sub { margin: 6px 0 0; color: var(--ink-soft); }
+    .btn {
+      background: var(--teal);
+      color: #fff;
+      border: 0;
+      border-radius: var(--radius);
+      padding: 11px 16px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1.4fr auto auto 1.5fr;
+      gap: 14px;
+      align-items: center;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 10px;
+    }
+    .id { display: flex; gap: 12px; align-items: center; }
+    .fav {
+      width: 36px; height: 36px; border-radius: 8px;
+      background: #ecfdf8; color: var(--teal-deep);
+      display: grid; place-items: center; font-weight: 700;
+      border: 1px solid #99f6e4;
+    }
+    .host { color: var(--ink-soft); font-size: 0.82rem; }
+    .ok {
+      font-size: 0.78rem; font-weight: 700;
+      background: #ecfdf5; color: #047857;
+      border: 1px solid #a7f3d0; border-radius: 999px;
+      padding: 4px 8px;
+    }
+    .stats { color: var(--ink-soft); font-size: 0.85rem; display: flex; gap: 12px; }
+    .actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+    .ghost {
+      background: #fff; color: var(--teal-deep);
+      border: 1px solid #99f6e4; border-radius: var(--radius);
+      padding: 7px 10px; font-weight: 600; font-size: 0.8rem;
+    }
+    .trash { border: 0; background: transparent; color: #94a3b8; }
+    .note {
+      margin-top: 18px; font-size: 0.85rem; color: var(--ink-soft);
+      max-width: 52rem; line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">StreamNews</div>
+    <div>
+      <div class="nav-title">Lire</div>
+      <a class="nav-item" href="#">Feed</a>
+      <a class="nav-item" href="#">Favoris</a>
+      <div class="nav-title">Analyser</div>
+      <a class="nav-item active" href="#">Sources</a>
+      <a class="nav-item" href="#">Jobs</a>
+      <div class="nav-title">Compte</div>
+      <a class="nav-item" href="#">Reglages</a>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="header">
+      <div>
+        <h1>Sources</h1>
+        <p class="sub">Sites analyses et leurs flux RSS</p>
+      </div>
+      <button class="btn">+ Ajouter une source</button>
+    </header>
+
+    <div class="row">
+      <div class="id"><div class="fav">L</div><div><strong>Le Monde</strong><div class="host">lemonde.fr</div></div></div>
+      <span class="ok">OK</span>
+      <div class="stats"><span>42 articles</span><span>3 RSS</span></div>
+      <div class="actions"><button class="ghost">Voir le feed</button><button class="ghost">Recharger</button><button class="trash">Suppr.</button></div>
+    </div>
+    <div class="row">
+      <div class="id"><div class="fav">E</div><div><strong>Les Echos</strong><div class="host">lesechos.fr</div></div></div>
+      <span class="ok">OK</span>
+      <div class="stats"><span>28 articles</span><span>2 RSS</span></div>
+      <div class="actions"><button class="ghost">Voir le feed</button><button class="ghost">Recharger</button><button class="trash">Suppr.</button></div>
+    </div>
+    <div class="row">
+      <div class="id"><div class="fav">R</div><div><strong>RFI</strong><div class="host">rfi.fr</div></div></div>
+      <span class="ok">OK</span>
+      <div class="stats"><span>61 articles</span><span>4 RSS</span></div>
+      <div class="actions"><button class="ghost">Voir le feed</button><button class="ghost">Recharger</button><button class="trash">Suppr.</button></div>
+    </div>
+
+    <p class="note">
+      UX (transcripts): gros CTA Ajouter (Fitts), delete petit et loin, feedback apres crawl
+      + next step "Lire le premier article" dans le modal. Options avancees cachees.
+      Ouverture: <code>docs/maquettes/maquette-06-sources.html</code>
+    </p>
+  </main>
+</body>
+</html>

@@ -26,10 +26,10 @@ app.use(helmet({
         useDefaults: true,
         directives: {
             defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
             scriptSrc: ["'self'"],
             imgSrc: ["'self'", "data:", "http:", "https:"],
-            fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "data:"],
+            fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com", "data:"],
             connectSrc: ["'self'", "ws:", "wss:"],
             upgradeInsecureRequests: null,
         },
@@ -169,6 +169,73 @@ app.get('/api/sites/:id/articles', async (req, res) => {
         res.status(status).json({
             error: 'Erreur lors de la récupération des articles',
             details: error.message
+        });
+    }
+});
+
+app.get('/api/articles/search', async (req, res) => {
+    try {
+        const response = await axios.get(`${ANALYZER_URL}/articles/search`, {
+            timeout: 20000,
+            params: {
+                q: req.query.q || '',
+                limit: req.query.limit || 40,
+                ...(req.query.site_id ? { site_id: req.query.site_id } : {}),
+            },
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur recherche articles:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors de la recherche',
+            details: error.message,
+        });
+    }
+});
+
+app.get('/api/trends', async (req, res) => {
+    try {
+        const response = await axios.get(`${ANALYZER_URL}/trends`, {
+            timeout: 60000,
+            params: {
+                days: req.query.days || 30,
+                limit: req.query.limit || 40,
+                kind: req.query.kind || 'all',
+                ...(req.query.site_id ? { site_id: req.query.site_id } : {}),
+                ...(req.query.refresh ? { refresh: req.query.refresh } : {}),
+            },
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur tendances:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors du chargement des tendances',
+            details: error.message,
+        });
+    }
+});
+
+app.post('/api/trends/refresh', async (req, res) => {
+    try {
+        const response = await axios.post(`${ANALYZER_URL}/trends/refresh`, null, {
+            timeout: 90000,
+            params: {
+                days: req.query.days || req.body?.days || 30,
+                limit: req.query.limit || req.body?.limit || 50,
+                ...(req.query.site_id || req.body?.site_id
+                    ? { site_id: req.query.site_id || req.body.site_id }
+                    : {}),
+            },
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur refresh tendances:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors du calcul des tendances',
+            details: error.message,
         });
     }
 });

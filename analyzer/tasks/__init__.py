@@ -231,6 +231,9 @@ async def _crawl_and_persist(site_id: int, url: str, max_pages: int, depth: int)
         status = result.status
         if await should_cancel():
             status = "cancelled"
+        # Pas de "completed" tant que l'import RSS n'a pas fini (sinon UI aha trop tot).
+        if status == "completed" and feeds:
+            status = "ingesting"
         await db.update_site_status(
             site_id, status, feeds, result.total_pages_analyzed, merge_feeds=True
         )
@@ -424,12 +427,25 @@ def finalize_analysis_task(
     pages_analyzed: int,
     rss_count: int,
 ):
-    """Etape 3 (fan-in) : notifie l'UI."""
+    """Etape 3 (fan-in) : marque le site termine + notifie l'UI."""
     articles_count = sum(ingest_counts or [])
+    final_status = "completed" if status in (None, "", "ingesting", "analyzing", "completed") else status
+
+    async def _mark_done():
+        async def _work(db: Database):
+            await db.update_site_status(site_id, final_status, total_pages=pages_analyzed)
+
+        await _with_db(_work)
+
+    try:
+        _run(_mark_done())
+    except Exception as exc:
+        logger.warning("finalize mark status failed site_id=%s: %s", site_id, exc)
+
     summary = PipelineSummary(
         site_id=site_id,
         url=url,
-        status=status,
+        status=final_status,
         rss_count=rss_count,
         articles_count=articles_count,
         pages_analyzed=pages_analyzed,
@@ -442,7 +458,7 @@ def finalize_analysis_task(
             "rss_count": rss_count,
             "articles_count": articles_count,
             "total_pages": pages_analyzed,
-            "status": status,
+            "status": final_status,
         }
     )
     return summary.model_dump()
