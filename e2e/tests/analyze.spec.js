@@ -152,6 +152,12 @@ test.describe('Suite idees e2e', () => {
     const briefBody = await brief.json();
     expect(briefBody).toHaveProperty('topics');
 
+    const daily = await request.get('/api/brief/daily');
+    expect(daily.ok()).toBeTruthy();
+    const dailyBody = await daily.json();
+    expect(dailyBody).toHaveProperty('topics');
+    expect(dailyBody.period || dailyBody.day).toBeTruthy();
+
     const ideas = await request.get('/api/ideas?limit=10');
     expect(ideas.ok()).toBeTruthy();
     const ideasBody = await ideas.json();
@@ -185,7 +191,8 @@ test.describe('Suite idees e2e', () => {
     await expect(page.getByTestId('watch-keywords')).toBeVisible();
 
     await page.getByTestId('nav-brief').click();
-    await expect(page.getByRole('heading', { name: /Brief hebdo/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /^Brief$/i })).toBeVisible();
+    await expect(page.getByTestId('brief-period')).toBeVisible();
     await expect(page.getByTestId('brief-content')).toBeVisible({ timeout: 20_000 });
 
     await page.getByTestId('nav-ideas').click();

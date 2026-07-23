@@ -39,6 +39,7 @@ export class StreamNewsApp {
         this.watchDays = 14;
         this._selectedWatchKeyword = null;
         this._brief = null;
+        this.briefPeriod = 'daily';
         this._collections = [];
         this._selectedCollectionId = null;
         this._ideas = [];
@@ -1209,6 +1210,15 @@ export class StreamNewsApp {
     }
 
     setupBriefPane() {
+        document.getElementById('briefPeriod')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-brief-period]');
+            if (!btn) return;
+            this.briefPeriod = btn.dataset.briefPeriod === 'weekly' ? 'weekly' : 'daily';
+            document.querySelectorAll('[data-brief-period]').forEach((el) => {
+                el.classList.toggle('is-active', el.dataset.briefPeriod === this.briefPeriod);
+            });
+            this.loadBrief({ refresh: false });
+        });
         document.getElementById('briefRefresh')?.addEventListener('click', () => {
             this.loadBrief({ refresh: true });
         });
@@ -1221,10 +1231,11 @@ export class StreamNewsApp {
             const ideaBtn = e.target.closest('[data-brief-idea]');
             if (ideaBtn && window.SN?.api?.createIdea) {
                 try {
+                    const label = this.briefPeriod === 'daily' ? 'brief quotidien' : 'brief hebdo';
                     const note = await window.SN.api.createIdea({
                         title: ideaBtn.dataset.briefIdea,
                         theme: ideaBtn.dataset.briefTheme || '',
-                        problem: `Sujet du brief hebdo : ${ideaBtn.dataset.briefIdea}`,
+                        problem: `Sujet du ${label} : ${ideaBtn.dataset.briefIdea}`,
                         status: 'draft',
                     });
                     this._selectedIdeaId = note?.id || null;
@@ -1241,12 +1252,24 @@ export class StreamNewsApp {
         const host = document.getElementById('briefContent');
         if (host) host.innerHTML = '<p class="feed-empty">Generation du brief...</p>';
         try {
-            const data = await window.SN.api.getWeeklyBrief({ refresh });
+            const api = window.SN?.api;
+            if (!api) throw new Error('API indisponible');
+            const isDaily = this.briefPeriod !== 'weekly';
+            const data = isDaily
+                ? (refresh
+                    ? await api.refreshDailyBrief()
+                    : await api.getDailyBrief({ auto: true }))
+                : (refresh
+                    ? await api.refreshWeeklyBrief()
+                    : await api.getWeeklyBrief());
             this._brief = data;
             const sub = document.getElementById('briefSubtitle');
             if (sub) {
                 const n = Array.isArray(data.topics) ? data.topics.length : 0;
-                sub.textContent = `${n} sujets · ${data.week || data.headline || 'semaine en cours'}`;
+                const label = isDaily
+                    ? (data.day || 'aujourd\'hui')
+                    : (data.week || data.week_start || data.headline || 'semaine');
+                sub.textContent = `${n} sujets · ${isDaily ? 'quotidien' : 'hebdo'} · ${label}`;
             }
             this.renderBrief();
             if (refresh) this.updateStatus('Brief genere', 'success');

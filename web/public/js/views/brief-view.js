@@ -5,11 +5,14 @@ export function renderBrief(brief) {
         return '<p class="feed-empty">Brief indisponible. Clique Generer.</p>';
     }
     const topics = brief.topics || [];
+    const period = brief.period || (brief.day ? 'daily' : 'weekly');
+    const emptyHint = period === 'daily'
+        ? 'Rien a briefer aujourd\'hui. Ajoute des sources puis regenerer.'
+        : 'Rien a briefer cette semaine. Ajoute des sources radar puis regenerer.';
     if (!topics.length) {
         return `
             <div class="sources-empty">
-                <p class="feed-empty">Rien a briefer cette semaine.</p>
-                <p class="pane-sub">Ajoute des sources radar puis regenerer.</p>
+                <p class="feed-empty">${emptyHint}</p>
             </div>`;
     }
     return `

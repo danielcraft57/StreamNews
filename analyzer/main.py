@@ -437,6 +437,29 @@ async def brief_weekly_refresh(week: str | None = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/brief/daily")
+async def brief_daily(day: str | None = None, refresh: bool = False, auto: bool = True):
+    try:
+        from services.brief_service import BriefService
+
+        svc = BriefService(db)
+        if refresh:
+            return await svc.refresh_daily(day=day)
+        return await svc.get_daily(day=day, auto=auto)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/brief/daily/refresh")
+async def brief_daily_refresh(day: str | None = None):
+    try:
+        from services.brief_service import BriefService
+
+        return await BriefService(db).refresh_daily(day=day)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/collections")
 async def list_collections():
     try:

@@ -345,6 +345,23 @@ app.post('/api/brief/weekly/refresh', (req, res) =>
         timeout: 120000,
         params: { ...(req.query.week || req.body?.week ? { week: req.query.week || req.body.week } : {}) },
     }));
+app.get('/api/brief/daily', (req, res) =>
+    proxyAnalyzer(req, res, {
+        path: '/brief/daily',
+        timeout: 120000,
+        params: {
+            ...(req.query.day ? { day: req.query.day } : {}),
+            ...(req.query.refresh ? { refresh: req.query.refresh } : {}),
+            ...(req.query.auto != null ? { auto: req.query.auto } : {}),
+        },
+    }));
+app.post('/api/brief/daily/refresh', (req, res) =>
+    proxyAnalyzer(req, res, {
+        method: 'post',
+        path: '/brief/daily/refresh',
+        timeout: 120000,
+        params: { ...(req.query.day || req.body?.day ? { day: req.query.day || req.body.day } : {}) },
+    }));
 
 app.get('/api/collections', (req, res) =>
     proxyAnalyzer(req, res, { path: '/collections' }));

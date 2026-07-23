@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from services.brief_service import week_start_iso
+from services.brief_service import day_iso, week_start_iso
 from services.idea_notes_service import render_idea_markdown
 
 
@@ -32,6 +32,12 @@ def test_week_start_iso_is_monday():
 
     # Thursday 2026-07-23 → Monday 2026-07-20
     assert week_start_iso(datetime(2026, 7, 23, 12, 0, 0)) == "2026-07-20"
+
+
+def test_day_iso():
+    from datetime import datetime
+
+    assert day_iso(datetime(2026, 7, 23, 9, 0, 0)) == "2026-07-23"
 
 
 def test_brief_topic_sort_prefers_higher_score():

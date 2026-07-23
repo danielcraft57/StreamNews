@@ -3543,13 +3543,19 @@
             <section class="brief-pane" id="briefPane" hidden>
                 <header class="pane-header">
                     <div>
-                        <h1>Brief hebdo</h1>
+                        <h1>Brief</h1>
                         <p class="pane-sub" id="briefSubtitle">Top sujets pour decider quoi builder</p>
                     </div>
-                    <md-outlined-button type="button" id="briefRefresh">
-                        <md-icon slot="icon">refresh</md-icon>
-                        Generer
-                    </md-outlined-button>
+                    <div class="jobs-header-tools">
+                        <div class="jobs-filters" id="briefPeriod" data-testid="brief-period">
+                            <button type="button" class="chip-filter is-active" data-brief-period="daily">Quotidien</button>
+                            <button type="button" class="chip-filter" data-brief-period="weekly">Hebdo</button>
+                        </div>
+                        <md-outlined-button type="button" id="briefRefresh">
+                            <md-icon slot="icon">refresh</md-icon>
+                            Generer
+                        </md-outlined-button>
+                    </div>
                 </header>
                 <div id="briefContent" class="brief-content" data-testid="brief-content">
                     <p class="feed-empty">Chargement du brief...</p>
@@ -3734,6 +3740,6 @@
         </div>
     </div>
 
-    <script type="module" src="/js/main.js?v=20260723pillars1"></script>
+    <script type="module" src="/js/main.js?v=20260723daily1"></script>
 </body>
 </html>

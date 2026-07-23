@@ -91,6 +91,20 @@ export const api = {
         const q = params.toString();
         return request(`/api/brief/weekly/refresh${q ? `?${q}` : ''}`, { method: 'POST' });
     },
+    getDailyBrief: ({ day = null, refresh = false, auto = true } = {}) => {
+        const params = new URLSearchParams();
+        if (day) params.set('day', day);
+        if (refresh) params.set('refresh', '1');
+        if (!auto) params.set('auto', 'false');
+        const q = params.toString();
+        return request(`/api/brief/daily${q ? `?${q}` : ''}`);
+    },
+    refreshDailyBrief: ({ day = null } = {}) => {
+        const params = new URLSearchParams();
+        if (day) params.set('day', day);
+        const q = params.toString();
+        return request(`/api/brief/daily/refresh${q ? `?${q}` : ''}`, { method: 'POST' });
+    },
     getCollections: () => request('/api/collections'),
     getCollection: (id) => request(`/api/collections/${id}`),
     addCollectionSite: (id, siteId) =>
