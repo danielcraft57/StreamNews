@@ -120,18 +120,28 @@ case "$ROLE" in
       fi
     '
     sys daemon-reload
-    if [[ "$ROLE" == "all" ]] || systemctl list-unit-files | grep -q streamnews-analyzer; then
-      sys restart streamnews-analyzer || true
+    # Restart obligatoire : sinon Express garde l'ancien server.js en memoire
+    # (CSP, routes) alors que le HTML disque est deja a jour.
+    if [[ "$ROLE" == "all" || "$has_app" == true ]]; then
+      echo "==> restart streamnews-analyzer + streamnews-web"
+      sys restart streamnews-analyzer
+      sys restart streamnews-web
+    elif systemctl list-unit-files 2>/dev/null | grep -qE '^streamnews-analyzer\.'; then
+      echo "==> restart streamnews-analyzer"
+      sys restart streamnews-analyzer
     fi
-    if systemctl list-unit-files | grep -q streamnews-worker; then
-      sys restart streamnews-worker || true
+    if [[ "$ROLE" == "all" || "$has_worker" == true ]]; then
+      echo "==> restart streamnews-worker"
+      sys restart streamnews-worker
     fi
-    if systemctl list-unit-files | grep -q streamnews-web; then
-      sys restart streamnews-web || true
+    if systemctl list-unit-files 2>/dev/null | grep -qE '^streamnews-beat\.'; then
+      echo "==> restart streamnews-beat"
+      sys restart streamnews-beat
     fi
     sys status streamnews-analyzer 2>/dev/null || true
     sys status streamnews-worker 2>/dev/null || true
     sys status streamnews-web 2>/dev/null || true
+    sys status streamnews-beat 2>/dev/null || true
     ;;
   *)
     echo "STREAMNEWS_ROLE inconnu: $ROLE (data|app|worker|all)"
