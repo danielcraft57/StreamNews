@@ -8,7 +8,7 @@ Pas de Docker. Roles fixes sur le LAN.
 |-----------------|------|----------|
 | **node6** | `data` | PostgreSQL + Redis |
 | **node7** | `app` | web + analyzer (**sans** worker) |
-| **node8+** | `worker` | Celery (`crawl`, `ingest`, `default`) + **beat** (brief quotidien) |
+| **node8+** | `worker` | Celery (`crawl`, `ingest`, `default`) + **beat** (un noeud : brief + poll RSS) |
 | **node9** | bastion SSH | point d'entree CD (GitHub Actions) |
 | **node12** | edge nginx | HTTPS public → proxy vers node7 |
 | **node14** | Redis local-dev | broker pour le mode local PC (SQLite) |

@@ -1,19 +1,32 @@
 # StreamNews
 
-**Version 0.2.0**
+**Version 0.5.1**
 
-Analyseur de flux RSS. Crawl un site, detecte les feeds RSS/Atom, suit la progression en temps reel via WebSocket.
+Console de veille RSS : crawl un site, detecte les feeds, suit l'avancement en live (WebSocket), puis analyse le corpus pour **tendances**, **radar d'idees**, **watchlist**, **briefs** et **fiches opportunite**.
 
 ## Stack
 
 | Piece | Role |
 |-------|------|
-| `web/` | Express + UI + WebSocket (port 3000) |
-| `analyzer/` | FastAPI + crawl RSS + Celery (port 8000) |
+| `web/` | Express + console UI + WebSocket (port 3000) |
+| `analyzer/` | FastAPI + crawl/ingest RSS + Celery (port 8000) |
 | DB | **Postgres** (prod / CI) ou **SQLite** (dev local) |
 | Redis | Broker Celery (homelab data, ou Redis distant en local) |
 
 Pas de Docker.
+
+## Fonctionnalites (0.5)
+
+| Zone | Contenu |
+|------|---------|
+| **Feed / Sources / Jobs** | Lecture, favoris, ajout de source, suivi crawl / enrich / NLP |
+| **Tendances** | Top mots-cles / entites / YAKE, fenetre 7–90 j, filtre par **collection** |
+| **Radar idees** | Signaux SaaS/IT (intents + themes), score decompose, pack RSS, fiches |
+| **Watchlist** | Mots-cles suivis + alertes de volume |
+| **Brief** | Quotidien (auto / cron) et hebdo |
+| **Collections** | Groupes thematiques de sources → filtre Radar / Tendances |
+| **Fiches idee** | Notes + export Markdown / Notion / Linear (liens prefill) |
+| **Poll RSS** | Celery beat recharge les flux (`FEED_REFRESH_MINUTES`, defaut 15) |
 
 ## Prerequis
 
@@ -27,12 +40,10 @@ Deux modes (fichiers d'env **non** versionnes) :
 
 | Mode | Fichier | DB | Redis |
 |------|---------|-----|-------|
-| **Local** | `.env.local` | SQLite (`data/streamnews.db`) | `node14.lan` |
+| **Local** | `.env.local` | SQLite (`data/streamnews.db`) | `node14.lan` (exemple) |
 | **Prod / prod-like** | `.env` | Postgres | localhost ou `node6.lan` |
 
 ### Windows (PowerShell)
-
-Prerequis : Python 3.11+ et Node.js 18+ (Python 3.13 OK en mode local SQLite).
 
 ```powershell
 .\scripts\install.ps1
@@ -41,10 +52,13 @@ Prerequis : Python 3.11+ et Node.js 18+ (Python 3.13 OK en mode local SQLite).
 ```
 
 Hot reload par defaut : analyzer (`uvicorn --reload`), web (`nodemon`), worker Celery (`watchdog`).
-Les fichiers `web/public/*` se rechargent avec un refresh navigateur (pas de restart).
-`-SkipInit` evite de relancer init-db ; `-NoReload` desactive le hot reload.
+Sous Windows, Celery tourne avec `--pool=solo` (obligatoire).
 
-Sous Windows, Celery tourne avec `--pool=solo` (obligatoire, pas de prefork).
+Pour le poll RSS / brief auto en local, lance aussi le **beat** (cwd `analyzer/`) :
+
+```powershell
+.\.venv\Scripts\python.exe -m celery -A celery_worker beat --loglevel=info
+```
 
 ### Linux / macOS (bash)
 
@@ -52,6 +66,7 @@ Sous Windows, Celery tourne avec `--pool=solo` (obligatoire, pas de prefork).
 bash scripts/install.sh
 bash scripts/init-db.sh --local
 bash scripts/dev.sh --local
+# optionnel : celery -A celery_worker beat --loglevel=info  (depuis analyzer/)
 ```
 
 ### Prod-like (Postgres)
@@ -59,8 +74,8 @@ bash scripts/dev.sh --local
 ```bash
 cp .env.example .env
 # Remplace TOUS les CHANGE_ME, cree user/db Postgres
-bash scripts/init-db.sh    # ou .\scripts\init-db.ps1 sous Windows
-bash scripts/dev.sh        # ou .\scripts\dev.ps1
+bash scripts/init-db.sh
+bash scripts/dev.sh
 ```
 
 UI : http://localhost:3000
@@ -72,11 +87,10 @@ Modeles versionnes (sans secrets) : `.env.example`, `.env.local.example`.
 | Script | Role |
 |--------|------|
 | `scripts/install.ps1` / `install.sh` | venv + deps Python/Node + cree les .env d'exemple |
-| `scripts/load-env.ps1` / `load-env.sh` | charge `.env.local` (`-Local` / `--local`) ou `.env` |
-| `scripts/init-db.ps1` / `init-db.sh` | cree le schema (`-Local` / `--local`, `-Reset` / `--reset`) |
-| `scripts/clean-local.ps1` / `clean-local.sh` | vide caches pytest + logs, supprime SQLite locale |
-| `scripts/dev.ps1` / `dev.sh` | lance analyzer + worker + web |
-| `scripts/e2e-stack.sh` | stack pour Playwright (CI / Postgres local) |
+| `scripts/init-db.ps1` / `init-db.sh` | schema Alembic (`-Local` / `--local`, `-Reset` / `--reset`) |
+| `scripts/dev.ps1` / `dev.sh` | analyzer + worker + web |
+| `scripts/e2e-stack.sh` | stack Playwright (CI / Postgres local) |
+| `scripts/clean-local.ps1` / `clean-local.sh` | caches + logs + SQLite locale |
 
 ## Variables d'environnement
 
@@ -89,6 +103,7 @@ Modeles versionnes (sans secrets) : `.env.example`, `.env.local.example`.
 | `ANALYZER_URL` | API analyzer (proxy cote web) |
 | `STREAMNEWS_ROLE` | `all` / `data` / `app` / `worker` |
 | `PORT` | Port web (defaut 3000) |
+| `FEED_REFRESH_MINUTES` | Intervalle poll RSS via beat (defaut 15, min 5) |
 | `POSTGRES_PASSWORD` | Obligatoire sur les scripts `deploy/setup-*.sh` |
 
 ## Secrets (important)
@@ -99,23 +114,21 @@ Ne committe **jamais** :
 - `data/*.db` (et fichiers `-wal` / `-shm`)
 - cles SSH, certificats, mots de passe reels
 
-Les setups homelab / VPS exigent `POSTGRES_PASSWORD=…` en argument : **pas** de defaut type `streamnews123` en prod.
+Les setups homelab / VPS exigent `POSTGRES_PASSWORD=…` en argument.
 
 Le mot de passe `streamnews123` n'existe que dans la **CI GitHub** (Postgres ephemere) et comme defaut de `scripts/e2e-stack.sh`.
 
-## Architecture analyzer
+## Architecture
 
-Voir [analyzer/ARCHITECTURE.md](analyzer/ARCHITECTURE.md) (services, queues, SQLite/Postgres).
-
-## Homelab multi-Pi
-
-Detail : [deploy/HOMELAB.md](deploy/HOMELAB.md) — index : [deploy/README.md](deploy/README.md).
+- Analyzer : [analyzer/ARCHITECTURE.md](analyzer/ARCHITECTURE.md) (services, queues, SQLite/Postgres)
+- Frontend : [web/ARCHITECTURE.md](web/ARCHITECTURE.md) (modules `js/`, Material Web)
+- Homelab : [deploy/HOMELAB.md](deploy/HOMELAB.md) — index deploy : [deploy/README.md](deploy/README.md)
 
 | Noeud (exemple) | Role |
 |-----------------|------|
 | **node6** | Postgres + Redis (`data`) |
 | **node7** | web + analyzer (`app`, pas de worker) |
-| **node8+** | workers Celery |
+| **node8+** | workers Celery + **un** beat |
 | **node9** | bastion SSH (CD, secret `DEPLOY_HOST`) |
 | **node12** | edge nginx / TLS public |
 | **node14** | Redis pour le mode local PC (SQLite) |
@@ -128,17 +141,14 @@ cd /opt/streamnews
 sudo POSTGRES_PASSWORD='ton-mot-de-passe-fort' bash deploy/setup-vps.sh
 ```
 
-Adapte ensuite `/opt/streamnews/.env` si besoin.
-
 ## Tests
 
 ```bash
-cd analyzer && pip install -r requirements.txt -r requirements-dev.txt && pytest -q
-cd web && npm ci && npm test
+cd analyzer && pip install -r requirements.txt -r requirements-dev.txt
+pytest -q -m "not integration"   # unit
+pytest -q -m integration         # Postgres (DATABASE_URL)
 
-# Reco faciale (optionnel, off par defaut) :
-# pip install -r analyzer/requirements-faces.txt
-# FACE_DETECT_ENABLED=1 FACE_DETECT_BACKEND=insightface
+cd web && npm ci && npm test
 
 # E2E (Postgres + Redis locaux requis)
 bash scripts/e2e-stack.sh
@@ -147,25 +157,25 @@ cd e2e && npm install && npx playwright install chromium && npm test
 
 ## CI/CD (GitHub Actions)
 
-- **Tests** : push/PR `main`
-- **Mise en ligne** : apres Tests OK → SSH bastion (`DEPLOY_HOST`) → flotte LAN en parallele
+- **Tests** : push/PR `main` (pytest unit + integration, npm, Playwright)
+- **Mise en ligne** : apres Tests OK → SSH bastion (`DEPLOY_HOST`) → flotte LAN
 
 | Type | Name | Exemple |
 |------|------|---------|
 | Variable | `ENABLE_DEPLOY` | `true` |
 | Variable | `FLEET_HOSTS` | `node6.lan node7.lan node8.lan` |
 | Variable | `FLEET_USER` | `pi` |
-| Secret | `DEPLOY_HOST` | IP/hostname du **bastion** (ex. node9), sans `https://` |
+| Secret | `DEPLOY_HOST` | bastion (ex. node9), sans `https://` |
 | Secret | `DEPLOY_USER` | `pi` |
 | Secret | `DEPLOY_SSH_KEY` | cle privee SSH |
 | Secret | `DEPLOY_PATH` | `/opt/streamnews` |
 
 ## Services systemd
 
-`streamnews-web`, `streamnews-analyzer`, `streamnews-worker`
+`streamnews-web`, `streamnews-analyzer`, `streamnews-worker`, `streamnews-beat`
 
 ```bash
-sudo systemctl status streamnews-web
+sudo systemctl status streamnews-web streamnews-beat
 sudo journalctl -u streamnews-analyzer -f
 ```
 

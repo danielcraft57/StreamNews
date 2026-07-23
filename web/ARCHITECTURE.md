@@ -30,13 +30,20 @@ public/
       realtime.js       # WebSocket
     views/              # rendu DOM
       feed-view.js
+      feed-chips.js
       reader-view.js
       sources-view.js
       jobs-view.js
-      settings-view.js
-      modal-view.js
+      trends-view.js
+      radar-view.js
+      watchlist-view.js
+      brief-view.js
+      collections-view.js
+      ideas-view.js
+      search-view.js
     ui/                 # wrappers Material + helpers
-      theme.js
+      chips.js
+      material-bindings.js
       toast.js
     utils/
       dom.js

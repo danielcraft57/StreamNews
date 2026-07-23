@@ -48,6 +48,7 @@ secrets/
 AGENTS.md
 .cursorrules.local
 .cursor/
+.cursorignore
 
 # IDE / OS
 .vscode/
@@ -102,6 +103,7 @@ temp/
 *.temp
 dump.rdb
 celerybeat-schedule
+celerybeat-schedule.*
 celerybeat.pid
 *.db
 *.sqlite
@@ -118,7 +120,9 @@ celerybeat.pid
 *.orig
 *.rej
 *.patch
-*.swp
 scripts/_tmp_*
 scripts/tmp_*
 deploy/_tmp_*
+
+# Artefacts agent locaux
+*.canvas.tsx

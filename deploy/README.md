@@ -16,7 +16,9 @@ Scripts d'install et de mise en ligne (homelab multi-Pi ou VPS unique). **Pas de
 |--------|--------|
 | `setup-data-node.sh` | Postgres + Redis (ex. node6) |
 | `setup-app-node.sh` | web + analyzer, sans worker (ex. node7) |
-| `setup-worker-node.sh` | Celery worker (ex. node8+) |
+| `setup-worker-node.sh` | Celery worker + **beat** (ex. node8+) |
+| `streamnews-worker.service` | Unit worker |
+| `streamnews-beat.service` | Unit beat (brief 06:00 UTC + poll RSS) |
 | `setup-vps.sh` | Tout-en-un sur une seule machine |
 | `ensure-app-user.sh` | Cree/repare user `streamnews` + sudoers |
 | `deploy.sh` | Pull + deps + restart (un noeud) |
