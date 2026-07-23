@@ -249,6 +249,7 @@ app.get('/api/radar', async (req, res) => {
                 limit: req.query.limit || 40,
                 theme: req.query.theme || 'all',
                 ...(req.query.refresh ? { refresh: req.query.refresh } : {}),
+                ...(req.query.collection_id ? { collection_id: req.query.collection_id } : {}),
             },
         });
         res.json(response.data);
@@ -269,6 +270,9 @@ app.post('/api/radar/refresh', async (req, res) => {
             params: {
                 days: req.query.days || req.body?.days || 30,
                 limit: req.query.limit || req.body?.limit || 40,
+                ...(req.query.collection_id || req.body?.collection_id
+                    ? { collection_id: req.query.collection_id || req.body.collection_id }
+                    : {}),
             },
         });
         res.json(response.data);
@@ -281,6 +285,97 @@ app.post('/api/radar/refresh', async (req, res) => {
         });
     }
 });
+
+async function proxyAnalyzer(req, res, { method = 'get', path, timeout = 60000, params, data } = {}) {
+    try {
+        const response = await axios({
+            method,
+            url: `${ANALYZER_URL}${path}`,
+            timeout,
+            params,
+            data,
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error(`Erreur proxy ${path}:`, error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: error.response?.data?.detail || error.message,
+            details: error.message,
+        });
+    }
+}
+
+app.get('/api/watchlist/keywords', (req, res) =>
+    proxyAnalyzer(req, res, { path: '/watchlist/keywords' }));
+app.post('/api/watchlist/keywords', (req, res) =>
+    proxyAnalyzer(req, res, { method: 'post', path: '/watchlist/keywords', data: req.body }));
+app.delete('/api/watchlist/keywords/:id', (req, res) =>
+    proxyAnalyzer(req, res, { method: 'delete', path: `/watchlist/keywords/${req.params.id}` }));
+app.get('/api/watchlist/alerts', (req, res) =>
+    proxyAnalyzer(req, res, {
+        path: '/watchlist/alerts',
+        params: {
+            days: req.query.days || 7,
+            limit: req.query.limit || 40,
+            ...(req.query.refresh ? { refresh: req.query.refresh } : {}),
+        },
+    }));
+app.post('/api/watchlist/refresh', (req, res) =>
+    proxyAnalyzer(req, res, {
+        method: 'post',
+        path: '/watchlist/refresh',
+        timeout: 90000,
+        params: { days: req.query.days || req.body?.days || 7 },
+    }));
+
+app.get('/api/brief/weekly', (req, res) =>
+    proxyAnalyzer(req, res, {
+        path: '/brief/weekly',
+        timeout: 120000,
+        params: {
+            ...(req.query.week ? { week: req.query.week } : {}),
+            ...(req.query.refresh ? { refresh: req.query.refresh } : {}),
+        },
+    }));
+app.post('/api/brief/weekly/refresh', (req, res) =>
+    proxyAnalyzer(req, res, {
+        method: 'post',
+        path: '/brief/weekly/refresh',
+        timeout: 120000,
+        params: { ...(req.query.week || req.body?.week ? { week: req.query.week || req.body.week } : {}) },
+    }));
+
+app.get('/api/collections', (req, res) =>
+    proxyAnalyzer(req, res, { path: '/collections' }));
+app.get('/api/collections/:id', (req, res) =>
+    proxyAnalyzer(req, res, { path: `/collections/${req.params.id}` }));
+app.post('/api/collections/:id/sites', (req, res) =>
+    proxyAnalyzer(req, res, {
+        method: 'post',
+        path: `/collections/${req.params.id}/sites`,
+        data: req.body,
+    }));
+app.delete('/api/collections/:id/sites/:siteId', (req, res) =>
+    proxyAnalyzer(req, res, {
+        method: 'delete',
+        path: `/collections/${req.params.id}/sites/${req.params.siteId}`,
+    }));
+
+app.get('/api/ideas', (req, res) =>
+    proxyAnalyzer(req, res, { path: '/ideas', params: { limit: req.query.limit || 50 } }));
+app.post('/api/ideas', (req, res) =>
+    proxyAnalyzer(req, res, { method: 'post', path: '/ideas', data: req.body }));
+app.post('/api/ideas/from-radar', (req, res) =>
+    proxyAnalyzer(req, res, { method: 'post', path: '/ideas/from-radar', data: req.body }));
+app.get('/api/ideas/:id/markdown', (req, res) =>
+    proxyAnalyzer(req, res, { path: `/ideas/${req.params.id}/markdown` }));
+app.get('/api/ideas/:id', (req, res) =>
+    proxyAnalyzer(req, res, { path: `/ideas/${req.params.id}` }));
+app.patch('/api/ideas/:id', (req, res) =>
+    proxyAnalyzer(req, res, { method: 'patch', path: `/ideas/${req.params.id}`, data: req.body }));
+app.delete('/api/ideas/:id', (req, res) =>
+    proxyAnalyzer(req, res, { method: 'delete', path: `/ideas/${req.params.id}` }));
 
 app.post('/api/sites/:id/ingest-articles', async (req, res) => {
     try {

@@ -292,26 +292,34 @@ async def get_radar(
     theme: str = "all",
     limit: int = 40,
     refresh: bool = False,
+    collection_id: int | None = None,
 ):
     """Radar idees : opportunites SaaS/IT depuis intent + themes."""
     try:
         from services.idea_radar_service import IdeaRadarService
 
+        site_ids = None
+        if collection_id:
+            from services.collections_service import CollectionsService
+
+            site_ids = await CollectionsService(db).get_site_ids(collection_id)
+
         svc = IdeaRadarService(db)
         days = max(1, min(days, 365))
-        if refresh:
-            data = await svc.refresh(window_days=days, limit=limit)
+        if refresh or site_ids is not None:
+            data = await svc.refresh(window_days=days, limit=limit, site_ids=site_ids)
             if theme and theme != "all":
                 data["ideas"] = [i for i in data["ideas"] if i.get("theme") == theme]
                 data["count"] = len(data["ideas"])
                 data["theme"] = theme
             else:
                 data["theme"] = "all"
+            data["collection_id"] = collection_id
             return data
 
         data = await svc.list_stored(window_days=days, theme=theme, limit=limit)
         if not data["ideas"]:
-            refreshed = await svc.refresh(window_days=days, limit=limit)
+            refreshed = await svc.refresh(window_days=days, limit=limit, site_ids=site_ids)
             if theme and theme != "all":
                 refreshed["ideas"] = [
                     i for i in refreshed["ideas"] if i.get("theme") == theme
@@ -320,7 +328,9 @@ async def get_radar(
                 refreshed["theme"] = theme
             else:
                 refreshed["theme"] = "all"
+            refreshed["collection_id"] = collection_id
             return refreshed
+        data["collection_id"] = collection_id
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -330,13 +340,239 @@ async def get_radar(
 async def refresh_radar(
     days: int = 30,
     limit: int = 40,
+    collection_id: int | None = None,
 ):
     """Recalcule et persiste le radar idees."""
     try:
         from services.idea_radar_service import IdeaRadarService
 
+        site_ids = None
+        if collection_id:
+            from services.collections_service import CollectionsService
+
+            site_ids = await CollectionsService(db).get_site_ids(collection_id)
         svc = IdeaRadarService(db)
-        return await svc.refresh(window_days=days, limit=limit)
+        return await svc.refresh(window_days=days, limit=limit, site_ids=site_ids)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/watchlist/keywords")
+async def watchlist_keywords():
+    try:
+        from services.watchlist_service import WatchlistService
+
+        kws = await WatchlistService(db).list_keywords()
+        return {"keywords": kws, "count": len(kws)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/watchlist/keywords")
+async def watchlist_add_keyword(payload: dict):
+    try:
+        from services.watchlist_service import WatchlistService
+
+        return await WatchlistService(db).add_keyword(payload.get("keyword") or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/watchlist/keywords/{keyword_id}")
+async def watchlist_delete_keyword(keyword_id: int):
+    try:
+        from services.watchlist_service import WatchlistService
+
+        await WatchlistService(db).delete_keyword(keyword_id)
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/watchlist/alerts")
+async def watchlist_alerts(days: int = 7, limit: int = 40, refresh: bool = False):
+    try:
+        from services.watchlist_service import WatchlistService
+
+        svc = WatchlistService(db)
+        if refresh:
+            return await svc.refresh(window_days=days)
+        return await svc.list_alerts(window_days=days, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/watchlist/refresh")
+async def watchlist_refresh(days: int = 7):
+    try:
+        from services.watchlist_service import WatchlistService
+
+        return await WatchlistService(db).refresh(window_days=days)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/brief/weekly")
+async def brief_weekly(week: str | None = None, refresh: bool = False):
+    try:
+        from services.brief_service import BriefService
+
+        svc = BriefService(db)
+        if refresh:
+            return await svc.refresh(week_start=week)
+        return await svc.get(week_start=week)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/brief/weekly/refresh")
+async def brief_weekly_refresh(week: str | None = None):
+    try:
+        from services.brief_service import BriefService
+
+        return await BriefService(db).refresh(week_start=week)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/collections")
+async def list_collections():
+    try:
+        from services.collections_service import CollectionsService
+
+        cols = await CollectionsService(db).list_collections()
+        return {"collections": cols, "count": len(cols)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/collections/{collection_id}")
+async def get_collection(collection_id: int):
+    try:
+        from services.collections_service import CollectionsService
+
+        col = await CollectionsService(db).get_collection(collection_id)
+        if not col:
+            raise HTTPException(status_code=404, detail="Collection introuvable")
+        return col
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/collections/{collection_id}/sites")
+async def collection_add_site(collection_id: int, payload: dict):
+    try:
+        from services.collections_service import CollectionsService
+
+        site_id = int(payload.get("site_id") or 0)
+        if not site_id:
+            raise HTTPException(status_code=400, detail="site_id requis")
+        return await CollectionsService(db).add_site(collection_id, site_id)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/collections/{collection_id}/sites/{site_id}")
+async def collection_remove_site(collection_id: int, site_id: int):
+    try:
+        from services.collections_service import CollectionsService
+
+        return await CollectionsService(db).remove_site(collection_id, site_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/ideas")
+async def list_ideas(limit: int = 50):
+    try:
+        from services.idea_notes_service import IdeaNotesService
+
+        notes = await IdeaNotesService(db).list_notes(limit=limit)
+        return {"ideas": notes, "count": len(notes)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ideas")
+async def create_idea(payload: dict):
+    try:
+        from services.idea_notes_service import IdeaNotesService
+
+        return await IdeaNotesService(db).create(payload or {})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ideas/from-radar")
+async def create_idea_from_radar(payload: dict):
+    try:
+        from services.idea_notes_service import IdeaNotesService
+
+        return await IdeaNotesService(db).from_radar(payload or {})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/ideas/{note_id}")
+async def get_idea(note_id: int):
+    try:
+        from services.idea_notes_service import IdeaNotesService
+
+        note = await IdeaNotesService(db).get(note_id)
+        if not note:
+            raise HTTPException(status_code=404, detail="Fiche introuvable")
+        return note
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/ideas/{note_id}")
+async def patch_idea(note_id: int, payload: dict):
+    try:
+        from services.idea_notes_service import IdeaNotesService
+
+        note = await IdeaNotesService(db).update(note_id, payload or {})
+        if not note:
+            raise HTTPException(status_code=404, detail="Fiche introuvable")
+        return note
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/ideas/{note_id}")
+async def delete_idea(note_id: int):
+    try:
+        from services.idea_notes_service import IdeaNotesService
+
+        await IdeaNotesService(db).delete(note_id)
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/ideas/{note_id}/markdown")
+async def idea_markdown(note_id: int):
+    try:
+        from services.idea_notes_service import IdeaNotesService, render_idea_markdown
+
+        note = await IdeaNotesService(db).get(note_id)
+        if not note:
+            raise HTTPException(status_code=404, detail="Fiche introuvable")
+        return {"id": note_id, "markdown": render_idea_markdown(note), "title": note.get("title")}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

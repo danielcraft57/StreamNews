@@ -1640,6 +1640,7 @@
             .app-shell.mockup .workspace{
                 display: grid;
                 grid-template-columns: minmax(300px, 0.95fr) minmax(360px, 1.25fr);
+                grid-template-rows: auto minmax(0, 1fr);
                 min-height: 100vh;
                 min-width: 0;
             }
@@ -1648,8 +1649,13 @@
             .app-shell.mockup .workspace.view-jobs,
             .app-shell.mockup .workspace.view-settings,
             .app-shell.mockup .workspace.view-tendances,
-            .app-shell.mockup .workspace.view-radar{
+            .app-shell.mockup .workspace.view-radar,
+            .app-shell.mockup .workspace.view-collections,
+            .app-shell.mockup .workspace.view-watchlist,
+            .app-shell.mockup .workspace.view-brief,
+            .app-shell.mockup .workspace.view-ideas{
                 grid-template-columns: 1fr;
+                grid-template-rows: minmax(0, 1fr);
             }
 
             .app-shell.mockup .feed-pane,
@@ -1663,15 +1669,41 @@
                 border-right: 1px solid var(--line);
                 display: flex;
                 flex-direction: column;
+                grid-column: 1;
+                grid-row: 2;
+            }
+
+            .app-shell.mockup .reader-pane{
+                grid-column: 2;
+                grid-row: 2;
+                display: flex;
+                flex-direction: column;
+                min-height: 0;
             }
 
             .app-shell.mockup .feed-header{
-                display: flex;
+                grid-column: 1 / -1;
+                grid-row: 1;
+                display: grid;
+                grid-template-columns: minmax(140px, 0.32fr) minmax(320px, 1fr);
+                grid-template-areas:
+                    "copy tools"
+                    "chips chips";
                 align-items: center;
-                justify-content: space-between;
-                padding: 18px 20px 12px;
-                border-bottom: 0;
-                gap: 12px;
+                column-gap: 20px;
+                row-gap: 12px;
+                padding: 16px 20px 14px;
+                border-bottom: 1px solid var(--line);
+                background: var(--panel);
+            }
+
+            .app-shell.mockup .feed-header[hidden]{
+                display: none !important;
+            }
+
+            .app-shell.mockup .feed-header-copy{
+                grid-area: copy;
+                min-width: 0;
             }
 
             .app-shell.mockup .feed-header h1{
@@ -1681,22 +1713,40 @@
             }
 
             .app-shell.mockup .feed-header-tools{
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                flex-wrap: wrap;
-                justify-content: flex-end;
+                grid-area: tools;
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                align-items: stretch;
+                gap: 10px;
+                width: 100%;
+                min-width: 0;
+            }
+
+            .app-shell.mockup .feed-source-bar{
+                grid-area: chips;
+                padding: 0;
+                border-bottom: 0;
+                width: 100%;
+            }
+
+            .app-shell.mockup .feed-header-tools .feed-tool-btn,
+            .app-shell.mockup .feed-header-tools md-filled-button{
+                width: 100%;
+                min-height: 42px;
+                justify-content: center;
+                box-sizing: border-box;
             }
 
             .app-shell.mockup .feed-tool-btn{
                 display: inline-flex;
                 align-items: center;
+                justify-content: center;
                 gap: 8px;
                 border: 1px solid var(--line);
                 background: var(--panel);
                 color: var(--ink);
                 border-radius: var(--radius);
-                padding: 8px 12px;
+                padding: 10px 12px;
                 font-size: 0.85rem;
                 font-weight: 600;
                 cursor: pointer;
@@ -1713,31 +1763,50 @@
             }
 
             .app-shell.mockup .feed-source-bar{
-                padding: 0 16px 12px;
-                border-bottom: 1px solid var(--line);
+                padding: 0;
+                border-bottom: 0;
+                width: 100%;
+            }
+
+            .app-shell.mockup .feed-source-bar[hidden]{
+                display: none !important;
+            }
+
+            /* Favoris : pas de chips -> titre + outils sur une seule ligne */
+            .app-shell.mockup .feed-header:not(:has(#feedSourceBar:not([hidden]))){
+                grid-template-areas: "copy tools";
+                grid-template-rows: auto;
             }
 
             .app-shell.mockup .feed-source-chips{
                 display: flex;
+                flex-wrap: wrap;
                 gap: 8px;
-                overflow-x: auto;
-                padding-bottom: 2px;
-                scrollbar-width: thin;
+                width: 100%;
+                overflow: visible;
             }
 
             .app-shell.mockup .source-chip{
                 display: inline-flex;
                 align-items: center;
                 gap: 8px;
-                flex: 0 0 auto;
+                flex: 0 1 auto;
+                max-width: min(240px, 100%);
                 border: 1px solid var(--line);
                 background: var(--panel);
                 color: var(--ink-soft);
                 border-radius: 999px;
-                padding: 6px 12px 6px 8px;
+                padding: 7px 12px 7px 8px;
                 font-size: 0.8rem;
                 font-weight: 600;
                 cursor: pointer;
+            }
+
+            .app-shell.mockup .source-chip-label{
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                min-width: 0;
             }
 
             .app-shell.mockup .source-chip:hover{
@@ -1752,12 +1821,19 @@
                 box-shadow: inset 0 0 0 1px rgba(13,148,136,0.15);
             }
 
+            .app-shell.mockup .source-chip-more{
+                border-style: dashed;
+                color: var(--teal-deep);
+                background: #f8fffd;
+            }
+
             .app-shell.mockup .source-chip-fav{
                 width: 18px;
                 height: 18px;
                 border-radius: 4px;
                 object-fit: cover;
                 background: #f1f5f9;
+                flex-shrink: 0;
             }
 
             .app-shell.mockup .source-chip-fav-fallback{
@@ -1867,21 +1943,44 @@
                 background: var(--surface);
             }
 
+            .app-shell.mockup .feed-pane[hidden],
+            .app-shell.mockup .reader-pane[hidden]{
+                display: none !important;
+            }
+
             .app-shell.mockup .article-reader{
                 max-height: none;
                 border: 0;
                 border-radius: 0;
                 background: transparent;
                 padding: 0;
+                min-height: 100%;
+            }
+
+            .app-shell.mockup .article-reader.reader-empty-state{
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 40px 28px;
+                color: var(--ink-soft);
+                text-align: center;
             }
 
             .app-shell.mockup .reader-toolbar{
                 display: flex;
                 flex-wrap: wrap;
-                gap: 16px;
-                padding: 14px 24px;
-                background: var(--panel);
+                gap: 8px 14px;
+                padding: 10px 24px;
+                background: var(--surface);
                 border-bottom: 1px solid var(--line);
+                position: sticky;
+                top: 0;
+                z-index: 2;
+            }
+
+            .app-shell.mockup .reader-toolbar md-text-button{
+                --md-text-button-container-height: 36px;
+                --md-text-button-label-text-size: 0.82rem;
             }
 
             .app-shell.mockup .reader-toolbar button{
@@ -1889,7 +1988,7 @@
                 background: transparent;
                 color: var(--ink-soft);
                 font-weight: 600;
-                font-size: 0.85rem;
+                font-size: 0.82rem;
                 cursor: pointer;
                 display: inline-flex;
                 align-items: center;
@@ -2049,7 +2148,11 @@
             .app-shell.mockup .jobs-pane[hidden],
             .app-shell.mockup .settings-pane[hidden],
             .app-shell.mockup .trends-pane[hidden],
-            .app-shell.mockup .radar-pane[hidden]{
+            .app-shell.mockup .radar-pane[hidden],
+            .app-shell.mockup .collections-pane[hidden],
+            .app-shell.mockup .watchlist-pane[hidden],
+            .app-shell.mockup .brief-pane[hidden],
+            .app-shell.mockup .ideas-pane[hidden]{
                 display: none !important;
             }
 
@@ -2062,7 +2165,15 @@
             .app-shell.mockup .workspace.view-tendances .feed-pane,
             .app-shell.mockup .workspace.view-tendances .reader-pane,
             .app-shell.mockup .workspace.view-radar .feed-pane,
-            .app-shell.mockup .workspace.view-radar .reader-pane{
+            .app-shell.mockup .workspace.view-radar .reader-pane,
+            .app-shell.mockup .workspace.view-collections .feed-pane,
+            .app-shell.mockup .workspace.view-collections .reader-pane,
+            .app-shell.mockup .workspace.view-watchlist .feed-pane,
+            .app-shell.mockup .workspace.view-watchlist .reader-pane,
+            .app-shell.mockup .workspace.view-brief .feed-pane,
+            .app-shell.mockup .workspace.view-brief .reader-pane,
+            .app-shell.mockup .workspace.view-ideas .feed-pane,
+            .app-shell.mockup .workspace.view-ideas .reader-pane{
                 display: none !important;
             }
 
@@ -2150,9 +2261,88 @@
 
             .app-shell.mockup .trends-pane,
             .app-shell.mockup .radar-pane,
+            .app-shell.mockup .collections-pane,
+            .app-shell.mockup .watchlist-pane,
+            .app-shell.mockup .brief-pane,
+            .app-shell.mockup .ideas-pane,
             .app-shell.mockup .jobs-pane{
                 padding: 24px 28px 32px;
                 overflow: auto;
+            }
+
+            .app-shell.mockup .brief-topics{
+                display: grid;
+                gap: 12px;
+                max-width: 920px;
+            }
+
+            .app-shell.mockup .brief-card{
+                border: 1px solid var(--line);
+                border-radius: 12px;
+                padding: 14px 16px;
+                background: #fff;
+            }
+
+            .app-shell.mockup .brief-card ul{
+                margin: 8px 0;
+                padding-left: 18px;
+            }
+
+            .app-shell.mockup .brief-card-actions{
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+
+            .app-shell.mockup .watch-kw-row{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 8px;
+                padding: 8px 0;
+                border-bottom: 1px solid var(--line);
+            }
+
+            .app-shell.mockup .collection-sites{
+                list-style: none;
+                padding: 0;
+                margin: 0;
+            }
+
+            .app-shell.mockup .collection-sites li{
+                display: flex;
+                justify-content: space-between;
+                gap: 8px;
+                padding: 8px 0;
+                border-bottom: 1px solid var(--line);
+            }
+
+            .app-shell.mockup .idea-edit-form{
+                display: grid;
+                gap: 12px;
+            }
+
+            .app-shell.mockup .idea-edit-form label{
+                display: grid;
+                gap: 6px;
+                font-weight: 600;
+                font-size: 0.85rem;
+                color: var(--ink-soft);
+            }
+
+            .app-shell.mockup .idea-edit-form input,
+            .app-shell.mockup .idea-edit-form textarea,
+            .app-shell.mockup .idea-edit-form select{
+                font: inherit;
+                padding: 8px 10px;
+                border: 1px solid var(--line);
+                border-radius: 8px;
+                color: var(--ink);
+            }
+
+            .app-shell.mockup .idea-edit-actions{
+                display: grid;
+                gap: 8px;
             }
 
             .app-shell.mockup .radar-pack{
@@ -2252,7 +2442,7 @@
             }
 
             .app-shell.mockup .feed-header{
-                align-items: flex-start;
+                align-items: center;
             }
 
             .app-shell.mockup .btn-primary{
@@ -3049,8 +3239,35 @@
                 }
                 .app-shell.mockup .workspace{
                     grid-template-columns: 1fr;
+                    grid-template-rows: auto minmax(0, 1fr);
+                }
+                .app-shell.mockup .feed-header{
+                    grid-column: 1;
+                    grid-row: 1;
+                    grid-template-columns: 1fr;
+                    grid-template-areas:
+                        "copy"
+                        "tools"
+                        "chips";
+                    align-items: stretch;
+                }
+                .app-shell.mockup .feed-pane,
+                .app-shell.mockup .reader-pane{
+                    grid-column: 1;
+                    grid-row: 2;
                 }
                 .app-shell.mockup .workspace.show-reader .feed-pane{ display: none; }
+                .app-shell.mockup .workspace.show-reader .reader-pane{
+                    grid-row: 2;
+                }
+                .app-shell.mockup .feed-header-tools{
+                    grid-template-columns: 1fr;
+                }
+                @media (min-width: 520px){
+                    .app-shell.mockup .feed-header-tools{
+                        grid-template-columns: repeat(3, minmax(0, 1fr));
+                    }
+                }
                 .app-shell.mockup .reader-back{
                     display: inline-flex;
                     align-items: center;
@@ -3090,6 +3307,18 @@
                     <button type="button" class="sidebar-nav-item" data-nav="radar" data-testid="nav-radar">
                         <i class="fas fa-bullseye"></i> Radar
                     </button>
+                    <button type="button" class="sidebar-nav-item" data-nav="collections" data-testid="nav-collections">
+                        <i class="fas fa-layer-group"></i> Collections
+                    </button>
+                    <button type="button" class="sidebar-nav-item" data-nav="watchlist" data-testid="nav-watchlist">
+                        <i class="fas fa-eye"></i> Watchlist
+                    </button>
+                    <button type="button" class="sidebar-nav-item" data-nav="brief" data-testid="nav-brief">
+                        <i class="fas fa-calendar-week"></i> Brief
+                    </button>
+                    <button type="button" class="sidebar-nav-item" data-nav="ideas" data-testid="nav-ideas">
+                        <i class="fas fa-lightbulb"></i> Fiches
+                    </button>
                 </div>
                 <div class="sidebar-nav-group">
                     <div class="sidebar-nav-title">Compte</div>
@@ -3109,33 +3338,34 @@
         </aside>
 
         <div class="workspace" id="workspace">
-            <section class="feed-pane" id="feedPane">
-                <header class="feed-header">
-                    <div class="feed-header-copy">
-                        <h1 id="feedTitle">Feed</h1>
-                        <p class="pane-sub" id="feedSubtitle">Tous tes articles, toutes sources confondues</p>
-                    </div>
-                    <div class="feed-header-tools">
-                        <button type="button" class="feed-tool-btn" id="openSearch" title="Rechercher (Ctrl+K)">
-                            <i class="fas fa-search" aria-hidden="true"></i>
-                            <span>Rechercher</span>
-                        </button>
-                        <button type="button" class="feed-tool-btn" id="feedRefresh" title="Actualiser le feed">
-                            <i class="fas fa-sync-alt" aria-hidden="true"></i>
-                            <span>Actualiser</span>
-                        </button>
-                        <md-filled-button type="button" id="openAddSourceFromFeed" title="Ajouter une source">
-                            <md-icon slot="icon">add</md-icon>
-                            Source
-                        </md-filled-button>
-                        <select class="feed-filter" id="feedFilter" hidden aria-hidden="true">
-                            <option value="all">Tous les articles</option>
-                        </select>
-                    </div>
-                </header>
-                <div class="feed-source-bar" id="feedSourceBar" aria-label="Filtrer par source">
-                    <div class="feed-source-chips" id="feedSourceChips"></div>
+            <header class="feed-header" id="feedTopbar">
+                <div class="feed-header-copy">
+                    <h1 id="feedTitle">Feed</h1>
+                    <p class="pane-sub" id="feedSubtitle">Tous tes articles, toutes sources confondues</p>
                 </div>
+                <div class="feed-header-tools">
+                    <button type="button" class="feed-tool-btn" id="openSearch" title="Rechercher (Ctrl+K)">
+                        <i class="fas fa-search" aria-hidden="true"></i>
+                        <span>Rechercher</span>
+                    </button>
+                    <button type="button" class="feed-tool-btn" id="feedRefresh" title="Actualiser le feed">
+                        <i class="fas fa-sync-alt" aria-hidden="true"></i>
+                        <span>Actualiser</span>
+                    </button>
+                    <md-filled-button type="button" id="openAddSourceFromFeed" title="Ajouter une source">
+                        <md-icon slot="icon">add</md-icon>
+                        Source
+                    </md-filled-button>
+                    <select class="feed-filter" id="feedFilter" hidden aria-hidden="true">
+                        <option value="all">Tous les articles</option>
+                    </select>
+                </div>
+                <div class="feed-source-bar" id="feedSourceBar" aria-label="Filtrer par source">
+                    <div class="feed-source-chips" id="feedSourceChips" data-testid="feed-source-chips"></div>
+                </div>
+            </header>
+
+            <section class="feed-pane" id="feedPane">
                 <div class="feed-list" id="feedList" data-testid="articles-list">
                     <p class="feed-empty">Chargement du feed...</p>
                 </div>
@@ -3242,6 +3472,8 @@
                             <button type="button" class="chip-filter" data-radar-theme-filter="saas">SaaS</button>
                             <button type="button" class="chip-filter" data-radar-theme-filter="devtools">Devtools</button>
                             <button type="button" class="chip-filter" data-radar-theme-filter="ai">IA</button>
+                            <button type="button" class="chip-filter" data-radar-theme-filter="mvp">MVP</button>
+                            <button type="button" class="chip-filter" data-radar-theme-filter="open-source">OSS</button>
                             <button type="button" class="chip-filter" data-radar-theme-filter="automation">Auto</button>
                         </div>
                         <md-outlined-button type="button" id="radarRefresh">
@@ -3257,6 +3489,90 @@
                     <aside id="radarDetail" class="jobs-detail radar-detail">
                         <p class="feed-empty">Selectionne une idee pour voir le detail.</p>
                         <div id="radarPackHost"></div>
+                    </aside>
+                </div>
+            </section>
+
+            <section class="collections-pane" id="collectionsPane" hidden>
+                <header class="pane-header">
+                    <div>
+                        <h1>Collections</h1>
+                        <p class="pane-sub" id="collectionsSubtitle">Groupes thematiques de sources</p>
+                    </div>
+                </header>
+                <div class="jobs-layout">
+                    <div id="collectionsList" class="jobs-list" data-testid="collections-list">
+                        <p class="feed-empty">Chargement...</p>
+                    </div>
+                    <aside id="collectionsDetail" class="jobs-detail">
+                        <p class="feed-empty">Selectionne une collection.</p>
+                    </aside>
+                </div>
+            </section>
+
+            <section class="watchlist-pane" id="watchlistPane" hidden>
+                <header class="pane-header">
+                    <div>
+                        <h1>Watchlist</h1>
+                        <p class="pane-sub" id="watchlistSubtitle">Mots-cles concurrents qui montent</p>
+                    </div>
+                    <div class="jobs-header-tools">
+                        <div class="jobs-filters" id="watchWindow">
+                            <button type="button" class="chip-filter" data-watch-days="7">7 j</button>
+                            <button type="button" class="chip-filter is-active" data-watch-days="14">14 j</button>
+                            <button type="button" class="chip-filter" data-watch-days="30">30 j</button>
+                        </div>
+                        <md-outlined-button type="button" id="watchRefresh">
+                            <md-icon slot="icon">refresh</md-icon>
+                            Recalculer
+                        </md-outlined-button>
+                    </div>
+                </header>
+                <div class="jobs-layout">
+                    <div>
+                        <div id="watchKwFormHost"></div>
+                        <div id="watchKeywords" class="watch-keywords" data-testid="watch-keywords"></div>
+                        <div id="watchAlerts" class="jobs-list" data-testid="watch-alerts" style="margin-top:16px"></div>
+                    </div>
+                    <aside id="watchDetail" class="jobs-detail" data-testid="watch-detail">
+                        <p class="feed-empty">Selectionne une alerte.</p>
+                    </aside>
+                </div>
+            </section>
+
+            <section class="brief-pane" id="briefPane" hidden>
+                <header class="pane-header">
+                    <div>
+                        <h1>Brief hebdo</h1>
+                        <p class="pane-sub" id="briefSubtitle">Top sujets pour decider quoi builder</p>
+                    </div>
+                    <md-outlined-button type="button" id="briefRefresh">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Generer
+                    </md-outlined-button>
+                </header>
+                <div id="briefContent" class="brief-content" data-testid="brief-content">
+                    <p class="feed-empty">Chargement du brief...</p>
+                </div>
+            </section>
+
+            <section class="ideas-pane" id="ideasPane" hidden>
+                <header class="pane-header">
+                    <div>
+                        <h1>Fiches idee</h1>
+                        <p class="pane-sub" id="ideasSubtitle">Notes opportunite + export Markdown</p>
+                    </div>
+                    <md-filled-button type="button" id="ideaCreateBlank">
+                        <md-icon slot="icon">add</md-icon>
+                        Nouvelle fiche
+                    </md-filled-button>
+                </header>
+                <div class="jobs-layout">
+                    <div id="ideasList" class="jobs-list" data-testid="ideas-list">
+                        <p class="feed-empty">Chargement...</p>
+                    </div>
+                    <aside id="ideasDetail" class="jobs-detail" data-testid="ideas-detail">
+                        <p class="feed-empty">Selectionne une fiche.</p>
                     </aside>
                 </div>
             </section>
@@ -3418,6 +3734,6 @@
         </div>
     </div>
 
-    <script type="module" src="/js/main.js?v=20260722radar1"></script>
+    <script type="module" src="/js/main.js?v=20260723pillars1"></script>
 </body>
 </html>

@@ -41,7 +41,8 @@ def test_score_bucket_rewards_intent_and_diversity():
         site_count=3,
         recency_bonus=1.5,
     )
-    assert strong > weak
+    assert strong["total"] > weak["total"]
+    assert "intent" in strong and "frequency" in strong and "novelty" in strong
 
 
 def test_snippet_around_keeps_context():

@@ -21,6 +21,7 @@ export class StreamNewsApp {
         this._favStorageKey = 'streamnews.favorites';
         this._readStorageKey = 'streamnews.read';
         this._settingsKey = 'streamnews.settings';
+        this._sourceChipsExpanded = false;
         this._jobLog = [];
         this._selectedJobId = null;
         this.jobsFilter = 'all';
@@ -32,6 +33,16 @@ export class StreamNewsApp {
         this.radarDays = 30;
         this.radarTheme = 'all';
         this._selectedRadarTheme = null;
+        this.radarCollectionId = null;
+        this._watchAlerts = [];
+        this._watchKeywords = [];
+        this.watchDays = 14;
+        this._selectedWatchKeyword = null;
+        this._brief = null;
+        this._collections = [];
+        this._selectedCollectionId = null;
+        this._ideas = [];
+        this._selectedIdeaId = null;
         this._pendingVictorySiteId = null;
         this.init();
     }
@@ -45,6 +56,10 @@ export class StreamNewsApp {
         this.setupJobsPane();
         this.setupTrendsPane();
         this.setupRadarPane();
+        this.setupWatchlistPane();
+        this.setupBriefPane();
+        this.setupCollectionsPane();
+        this.setupIdeasPane();
         this.loadSites();
         this.loadFeed();
         this.connectWebSocket();
@@ -283,6 +298,10 @@ export class StreamNewsApp {
             else if (action === 'go-jobs') this.showView('jobs');
             else if (action === 'go-tendances') this.showView('tendances');
             else if (action === 'go-radar') this.showView('radar');
+            else if (action === 'go-collections') this.showView('collections');
+            else if (action === 'go-watchlist') this.showView('watchlist');
+            else if (action === 'go-brief') this.showView('brief');
+            else if (action === 'go-ideas') this.showView('ideas');
             else if (action === 'reload-site') {
                 this.showView('sources');
                 this.updateStatus('Recharge le flux depuis Sources', 'info');
@@ -368,7 +387,20 @@ export class StreamNewsApp {
             this.showView('tendances');
         });
         document.querySelector('[data-nav="radar"]')?.addEventListener('click', () => {
+            this.radarCollectionId = null;
             this.showView('radar');
+        });
+        document.querySelector('[data-nav="collections"]')?.addEventListener('click', () => {
+            this.showView('collections');
+        });
+        document.querySelector('[data-nav="watchlist"]')?.addEventListener('click', () => {
+            this.showView('watchlist');
+        });
+        document.querySelector('[data-nav="brief"]')?.addEventListener('click', () => {
+            this.showView('brief');
+        });
+        document.querySelector('[data-nav="ideas"]')?.addEventListener('click', () => {
+            this.showView('ideas');
         });
         document.querySelector('[data-nav="settings"]')?.addEventListener('click', () => {
             this.showView('settings');
@@ -386,6 +418,12 @@ export class StreamNewsApp {
         });
 
         document.getElementById('feedSourceChips')?.addEventListener('click', (e) => {
+            const toggle = e.target.closest('[data-feed-sources-toggle]');
+            if (toggle) {
+                this._sourceChipsExpanded = toggle.dataset.feedSourcesToggle === 'expand';
+                this.syncSourceChips();
+                return;
+            }
             const chip = e.target.closest('[data-feed-source]');
             if (!chip) return;
             const filter = document.getElementById('feedFilter');
@@ -415,17 +453,26 @@ export class StreamNewsApp {
         this.currentView = view;
         const workspace = document.getElementById('workspace');
         const feedPane = document.getElementById('feedPane');
+        const feedTopbar = document.getElementById('feedTopbar');
         const readerPane = document.getElementById('readerPane');
         const sourcesPane = document.getElementById('sourcesPane');
         const jobsPane = document.getElementById('jobsPane');
         const trendsPane = document.getElementById('trendsPane');
         const radarPane = document.getElementById('radarPane');
+        const collectionsPane = document.getElementById('collectionsPane');
+        const watchlistPane = document.getElementById('watchlistPane');
+        const briefPane = document.getElementById('briefPane');
+        const ideasPane = document.getElementById('ideasPane');
         const settingsPane = document.getElementById('settingsPane');
 
         const isSources = view === 'sources';
         const isJobs = view === 'jobs';
         const isTendances = view === 'tendances';
         const isRadar = view === 'radar';
+        const isCollections = view === 'collections';
+        const isWatchlist = view === 'watchlist';
+        const isBrief = view === 'brief';
+        const isIdeas = view === 'ideas';
         const isSettings = view === 'settings';
         const isFavoris = view === 'favoris';
         const isFeedLike = view === 'feed' || isFavoris;
@@ -435,14 +482,23 @@ export class StreamNewsApp {
             workspace.classList.toggle('view-jobs', isJobs);
             workspace.classList.toggle('view-tendances', isTendances);
             workspace.classList.toggle('view-radar', isRadar);
+            workspace.classList.toggle('view-collections', isCollections);
+            workspace.classList.toggle('view-watchlist', isWatchlist);
+            workspace.classList.toggle('view-brief', isBrief);
+            workspace.classList.toggle('view-ideas', isIdeas);
             workspace.classList.toggle('view-settings', isSettings);
         }
+        if (feedTopbar) feedTopbar.hidden = !isFeedLike;
         if (feedPane) feedPane.hidden = !isFeedLike;
         if (readerPane) readerPane.hidden = !isFeedLike;
         if (sourcesPane) sourcesPane.hidden = !isSources;
         if (jobsPane) jobsPane.hidden = !isJobs;
         if (trendsPane) trendsPane.hidden = !isTendances;
         if (radarPane) radarPane.hidden = !isRadar;
+        if (collectionsPane) collectionsPane.hidden = !isCollections;
+        if (watchlistPane) watchlistPane.hidden = !isWatchlist;
+        if (briefPane) briefPane.hidden = !isBrief;
+        if (ideasPane) ideasPane.hidden = !isIdeas;
         if (settingsPane) settingsPane.hidden = !isSettings;
 
         document.querySelectorAll('.sidebar-nav-item[data-nav]').forEach((btn) => {
@@ -466,6 +522,22 @@ export class StreamNewsApp {
             this.loadRadar();
             return;
         }
+        if (isCollections) {
+            this.loadCollections();
+            return;
+        }
+        if (isWatchlist) {
+            this.loadWatchlist();
+            return;
+        }
+        if (isBrief) {
+            this.loadBrief();
+            return;
+        }
+        if (isIdeas) {
+            this.loadIdeas();
+            return;
+        }
         if (isSettings) {
             this.hydrateSettingsForm();
             return;
@@ -482,7 +554,9 @@ export class StreamNewsApp {
         const host = document.getElementById('feedSourceChips');
         if (!host || !window.SN?.feedChips?.renderSourceChips) return;
         const active = document.getElementById('feedFilter')?.value || 'all';
-        host.innerHTML = window.SN.feedChips.renderSourceChips(this._sitesCache || [], active);
+        host.innerHTML = window.SN.feedChips.renderSourceChips(this._sitesCache || [], active, {
+            expanded: !!this._sourceChipsExpanded,
+        });
         host.querySelectorAll('.js-hide-on-error').forEach((img) => {
             img.addEventListener('error', () => { img.style.display = 'none'; }, { once: true });
         });
@@ -846,25 +920,27 @@ export class StreamNewsApp {
             this.renderRadar();
         });
         document.getElementById('radarDetail')?.addEventListener('click', (e) => {
+            const packAll = e.target.closest('[data-radar-pack-all]');
+            if (packAll) {
+                this.addRadarPackAll();
+                return;
+            }
             const packBtn = e.target.closest('[data-radar-source-url]');
             if (packBtn) {
                 const url = packBtn.dataset.radarSourceUrl;
                 if (url) this.openAddSourceModal({ url });
                 return;
             }
+            const createIdea = e.target.closest('[data-radar-create-idea]');
+            if (createIdea) {
+                this.createIdeaFromSelectedRadar();
+                return;
+            }
             const searchBtn = e.target.closest('[data-radar-search]');
             if (searchBtn) {
                 const term = searchBtn.dataset.radarSearch;
                 if (!term) return;
-                this.showView('feed');
-                const overlay = document.getElementById('searchOverlay');
-                const input = document.getElementById('searchInput');
-                if (overlay && input) {
-                    overlay.classList.add('open');
-                    input.value = term;
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                    input.focus();
-                }
+                this.openFeedSearch(term);
                 return;
             }
             const artBtn = e.target.closest('[data-radar-article]');
@@ -877,6 +953,70 @@ export class StreamNewsApp {
         });
     }
 
+    openFeedSearch(term) {
+        this.showView('feed');
+        const overlay = document.getElementById('searchOverlay');
+        const input = document.getElementById('searchInput');
+        if (overlay && input) {
+            overlay.classList.add('open');
+            input.value = term;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.focus();
+        }
+    }
+
+    async addRadarPackAll() {
+        const sources = window.SN?.radarView?.RECOMMENDED_SOURCES || [];
+        if (!sources.length || !window.SN?.api?.analyze) {
+            this.updateStatus('Pack indisponible', 'error');
+            return;
+        }
+        if (this._packRunning) {
+            this.updateStatus('Pack deja en cours…', 'info');
+            return;
+        }
+        this._packRunning = true;
+        let ok = 0;
+        try {
+            for (let i = 0; i < sources.length; i++) {
+                const s = sources[i];
+                this.updateStatus(`Pack ${i + 1}/${sources.length} · ${s.label}…`, 'info');
+                try {
+                    await window.SN.api.analyze({
+                        url: s.url,
+                        max_pages: 30,
+                        depth: 1,
+                    });
+                    ok += 1;
+                } catch (err) {
+                    console.warn('pack source', s.url, err);
+                }
+            }
+            await this.loadSites();
+            this.updateStatus(`Pack termine · ${ok}/${sources.length} lances`, 'success');
+        } finally {
+            this._packRunning = false;
+        }
+    }
+
+    async createIdeaFromSelectedRadar() {
+        const ideas = this._radarIdeas || [];
+        const selected = ideas.find((i) => i.theme === this._selectedRadarTheme) || ideas[0];
+        if (!selected || !window.SN?.api?.createIdeaFromRadar) {
+            this.updateStatus('Aucune idee a convertir', 'error');
+            return;
+        }
+        try {
+            const note = await window.SN.api.createIdeaFromRadar(selected);
+            this.updateStatus('Fiche creee', 'success');
+            this._selectedIdeaId = note?.id || null;
+            this.showView('ideas');
+        } catch (err) {
+            console.error(err);
+            this.updateStatus(err.message || 'Erreur fiche', 'error');
+        }
+    }
+
     async loadRadar({ refresh = false } = {}) {
         const list = document.getElementById('radarList');
         if (list) list.innerHTML = '<p class="feed-empty">Scan du radar...</p>';
@@ -887,6 +1027,7 @@ export class StreamNewsApp {
                     theme: 'all',
                     limit: 40,
                     refresh,
+                    collectionId: this.radarCollectionId,
                 })
                 : await (async () => {
                     const params = new URLSearchParams({
@@ -895,6 +1036,9 @@ export class StreamNewsApp {
                         theme: 'all',
                     });
                     if (refresh) params.set('refresh', '1');
+                    if (this.radarCollectionId) {
+                        params.set('collection_id', String(this.radarCollectionId));
+                    }
                     const res = await fetch(`/api/radar?${params}`);
                     return res.json();
                 })();
@@ -904,7 +1048,8 @@ export class StreamNewsApp {
                 const when = data.computed_at
                     ? `Maj ${new Date(data.computed_at).toLocaleString('fr-FR')}`
                     : 'Intent + themes dans tes articles';
-                sub.textContent = `${data.count || this._radarIdeas.length} signaux · ${this.radarDays} j · ${when}`;
+                const col = this.radarCollectionId ? ' · collection' : '';
+                sub.textContent = `${data.count || this._radarIdeas.length} signaux · ${this.radarDays} j${col} · ${when}`;
             }
             if (!this._selectedRadarTheme && this._radarIdeas.length) {
                 this._selectedRadarTheme = this._radarIdeas[0].theme;
@@ -948,6 +1093,395 @@ export class StreamNewsApp {
             : '';
         const selected = ideas.find((i) => i.theme === this._selectedRadarTheme) || ideas[0];
         detail.innerHTML = `${rv?.renderRadarDetail ? rv.renderRadarDetail(selected) : ''}${packHtml}`;
+    }
+
+    setupWatchlistPane() {
+        document.getElementById('watchWindow')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-watch-days]');
+            if (!btn) return;
+            this.watchDays = Number(btn.dataset.watchDays) || 14;
+            document.querySelectorAll('[data-watch-days]').forEach((el) => {
+                el.classList.toggle('is-active', Number(el.dataset.watchDays) === this.watchDays);
+            });
+            this.loadWatchlist({ refresh: false });
+        });
+        document.getElementById('watchRefresh')?.addEventListener('click', () => {
+            this.loadWatchlist({ refresh: true });
+        });
+        document.getElementById('watchKeywords')?.addEventListener('click', async (e) => {
+            const del = e.target.closest('[data-watch-kw-delete]');
+            if (!del || !window.SN?.api) return;
+            try {
+                await window.SN.api.deleteWatchKeyword(Number(del.dataset.watchKwDelete));
+                this.loadWatchlist();
+            } catch (err) {
+                this.updateStatus(err.message || 'Erreur', 'error');
+            }
+        });
+        document.getElementById('watchAlerts')?.addEventListener('click', (e) => {
+            const row = e.target.closest('[data-watch-alert]');
+            if (!row) return;
+            this._selectedWatchKeyword = row.dataset.watchAlert;
+            this.renderWatchlist();
+        });
+        document.getElementById('watchDetail')?.addEventListener('click', (e) => {
+            const packBtn = e.target.closest('[data-radar-source-url]');
+            if (packBtn) {
+                const url = packBtn.dataset.radarSourceUrl;
+                if (url) this.openAddSourceModal({ url });
+                return;
+            }
+            const searchBtn = e.target.closest('[data-watch-search]');
+            if (searchBtn?.dataset.watchSearch) {
+                this.openFeedSearch(searchBtn.dataset.watchSearch);
+            }
+        });
+        document.getElementById('watchKwFormHost')?.addEventListener('submit', async (e) => {
+            const form = e.target.closest('#watchKwForm');
+            if (!form) return;
+            e.preventDefault();
+            const input = document.getElementById('watchKwInput');
+            const kw = (input?.value || '').trim();
+            if (!kw || !window.SN?.api) return;
+            try {
+                await window.SN.api.addWatchKeyword(kw);
+                if (input) input.value = '';
+                this.loadWatchlist({ refresh: true });
+            } catch (err) {
+                this.updateStatus(err.message || 'Erreur mot-cle', 'error');
+            }
+        });
+    }
+
+    async loadWatchlist({ refresh = false } = {}) {
+        const alertsEl = document.getElementById('watchAlerts');
+        if (alertsEl) alertsEl.innerHTML = '<p class="feed-empty">Scan watchlist...</p>';
+        try {
+            const api = window.SN?.api;
+            if (!api) throw new Error('API indisponible');
+            const [kwData, alertData] = await Promise.all([
+                api.getWatchKeywords(),
+                api.getWatchAlerts({ days: this.watchDays, limit: 40, refresh }),
+            ]);
+            this._watchKeywords = Array.isArray(kwData.keywords) ? kwData.keywords
+                : (Array.isArray(kwData) ? kwData : []);
+            this._watchAlerts = Array.isArray(alertData.alerts) ? alertData.alerts
+                : (Array.isArray(alertData) ? alertData : []);
+            const sub = document.getElementById('watchlistSubtitle');
+            if (sub) {
+                sub.textContent = `${this._watchKeywords.length} mots-cles · ${this._watchAlerts.length} alertes · ${this.watchDays} j`;
+            }
+            if (!this._selectedWatchKeyword && this._watchAlerts.length) {
+                this._selectedWatchKeyword = this._watchAlerts[0].keyword;
+            }
+            this.renderWatchlist();
+            if (refresh) this.updateStatus('Watchlist a jour', 'success');
+        } catch (err) {
+            console.error(err);
+            if (alertsEl) {
+                alertsEl.innerHTML = `<p class="feed-empty">Erreur watchlist (${this.escapeHtml(err.message || '')}).</p>`;
+            }
+            this.updateStatus('Erreur watchlist', 'error');
+        }
+    }
+
+    renderWatchlist() {
+        const formHost = document.getElementById('watchKwFormHost');
+        const kwEl = document.getElementById('watchKeywords');
+        const alertsEl = document.getElementById('watchAlerts');
+        const detail = document.getElementById('watchDetail');
+        const wv = window.SN?.watchlistView;
+        if (formHost && wv?.renderWatchForm) formHost.innerHTML = wv.renderWatchForm();
+        if (kwEl && wv?.renderWatchKeywords) {
+            kwEl.innerHTML = wv.renderWatchKeywords(this._watchKeywords || []);
+        }
+        if (alertsEl && wv?.renderWatchAlerts) {
+            alertsEl.innerHTML = wv.renderWatchAlerts(this._watchAlerts || [], {
+                selected: this._selectedWatchKeyword,
+            });
+        }
+        if (detail && wv?.renderWatchDetail) {
+            const selected = (this._watchAlerts || []).find(
+                (a) => a.keyword === this._selectedWatchKeyword
+            ) || null;
+            detail.innerHTML = wv.renderWatchDetail(selected);
+        }
+    }
+
+    setupBriefPane() {
+        document.getElementById('briefRefresh')?.addEventListener('click', () => {
+            this.loadBrief({ refresh: true });
+        });
+        document.getElementById('briefContent')?.addEventListener('click', async (e) => {
+            const searchBtn = e.target.closest('[data-brief-search]');
+            if (searchBtn?.dataset.briefSearch) {
+                this.openFeedSearch(searchBtn.dataset.briefSearch);
+                return;
+            }
+            const ideaBtn = e.target.closest('[data-brief-idea]');
+            if (ideaBtn && window.SN?.api?.createIdea) {
+                try {
+                    const note = await window.SN.api.createIdea({
+                        title: ideaBtn.dataset.briefIdea,
+                        theme: ideaBtn.dataset.briefTheme || '',
+                        problem: `Sujet du brief hebdo : ${ideaBtn.dataset.briefIdea}`,
+                        status: 'draft',
+                    });
+                    this._selectedIdeaId = note?.id || null;
+                    this.updateStatus('Fiche creee depuis le brief', 'success');
+                    this.showView('ideas');
+                } catch (err) {
+                    this.updateStatus(err.message || 'Erreur fiche', 'error');
+                }
+            }
+        });
+    }
+
+    async loadBrief({ refresh = false } = {}) {
+        const host = document.getElementById('briefContent');
+        if (host) host.innerHTML = '<p class="feed-empty">Generation du brief...</p>';
+        try {
+            const data = await window.SN.api.getWeeklyBrief({ refresh });
+            this._brief = data;
+            const sub = document.getElementById('briefSubtitle');
+            if (sub) {
+                const n = Array.isArray(data.topics) ? data.topics.length : 0;
+                sub.textContent = `${n} sujets · ${data.week || data.headline || 'semaine en cours'}`;
+            }
+            this.renderBrief();
+            if (refresh) this.updateStatus('Brief genere', 'success');
+        } catch (err) {
+            console.error(err);
+            if (host) {
+                host.innerHTML = `<p class="feed-empty">Erreur brief (${this.escapeHtml(err.message || '')}).</p>`;
+            }
+            this.updateStatus('Erreur brief', 'error');
+        }
+    }
+
+    renderBrief() {
+        const host = document.getElementById('briefContent');
+        const bv = window.SN?.briefView;
+        if (!host || !bv?.renderBrief) return;
+        host.innerHTML = bv.renderBrief(this._brief);
+    }
+
+    setupCollectionsPane() {
+        document.getElementById('collectionsList')?.addEventListener('click', (e) => {
+            const row = e.target.closest('[data-collection-id]');
+            if (!row) return;
+            this._selectedCollectionId = Number(row.dataset.collectionId);
+            this.loadCollectionDetail(this._selectedCollectionId);
+        });
+        document.getElementById('collectionsDetail')?.addEventListener('click', async (e) => {
+            const openRadar = e.target.closest('[data-collection-open-radar]');
+            if (openRadar) {
+                this.radarCollectionId = Number(openRadar.dataset.collectionOpenRadar) || null;
+                this.showView('radar');
+                return;
+            }
+            const remove = e.target.closest('[data-collection-remove-site]');
+            if (remove && this._selectedCollectionId && window.SN?.api) {
+                try {
+                    await window.SN.api.removeCollectionSite(
+                        this._selectedCollectionId,
+                        Number(remove.dataset.collectionRemoveSite)
+                    );
+                    this.loadCollectionDetail(this._selectedCollectionId);
+                } catch (err) {
+                    this.updateStatus(err.message || 'Erreur', 'error');
+                }
+            }
+        });
+        document.getElementById('collectionsDetail')?.addEventListener('submit', async (e) => {
+            const form = e.target.closest('#collectionAddSiteForm');
+            if (!form || !this._selectedCollectionId) return;
+            e.preventDefault();
+            const select = document.getElementById('collectionAddSiteSelect');
+            const siteId = Number(select?.value);
+            if (!siteId || !window.SN?.api) return;
+            try {
+                await window.SN.api.addCollectionSite(this._selectedCollectionId, siteId);
+                this.loadCollectionDetail(this._selectedCollectionId);
+            } catch (err) {
+                this.updateStatus(err.message || 'Erreur liaison', 'error');
+            }
+        });
+    }
+
+    async loadCollections() {
+        const list = document.getElementById('collectionsList');
+        if (list) list.innerHTML = '<p class="feed-empty">Chargement...</p>';
+        try {
+            const data = await window.SN.api.getCollections();
+            this._collections = Array.isArray(data.collections) ? data.collections
+                : (Array.isArray(data) ? data : []);
+            if (!this._selectedCollectionId && this._collections.length) {
+                this._selectedCollectionId = this._collections[0].id;
+            }
+            this.renderCollectionsList();
+            if (this._selectedCollectionId) {
+                await this.loadCollectionDetail(this._selectedCollectionId);
+            }
+        } catch (err) {
+            console.error(err);
+            if (list) {
+                list.innerHTML = `<p class="feed-empty">Erreur collections (${this.escapeHtml(err.message || '')}).</p>`;
+            }
+        }
+    }
+
+    renderCollectionsList() {
+        const list = document.getElementById('collectionsList');
+        const cv = window.SN?.collectionsView;
+        if (!list || !cv?.renderCollectionsList) return;
+        list.innerHTML = cv.renderCollectionsList(this._collections, this._selectedCollectionId);
+    }
+
+    async loadCollectionDetail(id) {
+        const detail = document.getElementById('collectionsDetail');
+        const cv = window.SN?.collectionsView;
+        if (!detail || !cv?.renderCollectionDetail) return;
+        try {
+            const col = await window.SN.api.getCollection(id);
+            this._selectedCollectionId = id;
+            this.renderCollectionsList();
+            detail.innerHTML = cv.renderCollectionDetail(col, this._sitesCache || []);
+        } catch (err) {
+            detail.innerHTML = `<p class="feed-empty">${this.escapeHtml(err.message || 'Erreur')}</p>`;
+        }
+    }
+
+    setupIdeasPane() {
+        document.getElementById('ideaCreateBlank')?.addEventListener('click', async () => {
+            if (!window.SN?.api?.createIdea) return;
+            try {
+                const note = await window.SN.api.createIdea({
+                    title: 'Nouvelle idee',
+                    status: 'draft',
+                });
+                this._selectedIdeaId = note?.id || null;
+                this.loadIdeas();
+            } catch (err) {
+                this.updateStatus(err.message || 'Erreur', 'error');
+            }
+        });
+        document.getElementById('ideasList')?.addEventListener('click', (e) => {
+            const row = e.target.closest('[data-idea-id]');
+            if (!row) return;
+            this._selectedIdeaId = Number(row.dataset.ideaId);
+            this.renderIdeas();
+        });
+        document.getElementById('ideasDetail')?.addEventListener('submit', async (e) => {
+            const form = e.target.closest('#ideaEditForm');
+            if (!form) return;
+            e.preventDefault();
+            const id = Number(form.dataset.ideaId);
+            const fd = new FormData(form);
+            const evidenceRaw = String(fd.get('evidence') || '');
+            const body = {
+                title: String(fd.get('title') || '').trim(),
+                theme: String(fd.get('theme') || '').trim(),
+                problem: String(fd.get('problem') || ''),
+                mvp_plan: String(fd.get('mvp_plan') || ''),
+                status: String(fd.get('status') || 'draft'),
+                evidence: evidenceRaw.split('\n').map((l) => l.trim()).filter(Boolean),
+            };
+            try {
+                await window.SN.api.updateIdea(id, body);
+                this.updateStatus('Fiche enregistree', 'success');
+                this.loadIdeas();
+            } catch (err) {
+                this.updateStatus(err.message || 'Erreur save', 'error');
+            }
+        });
+        document.getElementById('ideasDetail')?.addEventListener('click', async (e) => {
+            const mdBtn = e.target.closest('[data-idea-md]');
+            const dlBtn = e.target.closest('[data-idea-download]');
+            const notionBtn = e.target.closest('[data-idea-notion]');
+            const linearBtn = e.target.closest('[data-idea-linear]');
+            const delBtn = e.target.closest('[data-idea-delete]');
+            if (delBtn) {
+                if (!confirm('Supprimer cette fiche ?')) return;
+                try {
+                    await window.SN.api.deleteIdea(Number(delBtn.dataset.ideaDelete));
+                    this._selectedIdeaId = null;
+                    this.loadIdeas();
+                } catch (err) {
+                    this.updateStatus(err.message || 'Erreur', 'error');
+                }
+                return;
+            }
+            const id = Number(
+                mdBtn?.dataset.ideaMd
+                || dlBtn?.dataset.ideaDownload
+                || notionBtn?.dataset.ideaNotion
+                || linearBtn?.dataset.ideaLinear
+            );
+            if (!id) return;
+            try {
+                const data = await window.SN.api.getIdeaMarkdown(id);
+                const md = data.markdown || data.content || '';
+                const title = data.title || 'idee';
+                if (mdBtn) {
+                    await navigator.clipboard.writeText(md);
+                    this.updateStatus('Markdown copie', 'success');
+                    return;
+                }
+                if (dlBtn) {
+                    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `${String(title).replace(/[^\w\-]+/g, '_').slice(0, 40) || 'idee'}.md`;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                    return;
+                }
+                if (notionBtn) {
+                    await navigator.clipboard.writeText(md);
+                    window.open('https://www.notion.so/new', '_blank', 'noopener');
+                    this.updateStatus('Markdown copie · colle dans Notion', 'success');
+                    return;
+                }
+                if (linearBtn) {
+                    const url = `https://linear.app/new?title=${encodeURIComponent(title)}&description=${encodeURIComponent(md.slice(0, 1800))}`;
+                    window.open(url, '_blank', 'noopener');
+                }
+            } catch (err) {
+                this.updateStatus(err.message || 'Erreur export', 'error');
+            }
+        });
+    }
+
+    async loadIdeas() {
+        const list = document.getElementById('ideasList');
+        if (list) list.innerHTML = '<p class="feed-empty">Chargement...</p>';
+        try {
+            const data = await window.SN.api.getIdeas({ limit: 80 });
+            this._ideas = Array.isArray(data.ideas) ? data.ideas
+                : (Array.isArray(data) ? data : []);
+            if (!this._selectedIdeaId && this._ideas.length) {
+                this._selectedIdeaId = this._ideas[0].id;
+            }
+            const sub = document.getElementById('ideasSubtitle');
+            if (sub) sub.textContent = `${this._ideas.length} fiche${this._ideas.length > 1 ? 's' : ''}`;
+            this.renderIdeas();
+        } catch (err) {
+            console.error(err);
+            if (list) {
+                list.innerHTML = `<p class="feed-empty">Erreur fiches (${this.escapeHtml(err.message || '')}).</p>`;
+            }
+        }
+    }
+
+    renderIdeas() {
+        const list = document.getElementById('ideasList');
+        const detail = document.getElementById('ideasDetail');
+        const iv = window.SN?.ideasView;
+        if (!list || !detail || !iv) return;
+        list.innerHTML = iv.renderIdeasList(this._ideas || [], this._selectedIdeaId);
+        const selected = (this._ideas || []).find((i) => Number(i.id) === Number(this._selectedIdeaId)) || null;
+        detail.innerHTML = iv.renderIdeaDetail(selected);
     }
 
     pushJob(job) {

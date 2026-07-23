@@ -42,6 +42,18 @@ test.describe('StreamNews UI', () => {
     await expect(page.getByTestId('radar-list')).toBeVisible();
     await expect(page.getByRole('heading', { name: /Radar idees/i })).toBeVisible();
 
+    await page.getByTestId('nav-collections').click();
+    await expect(page.getByTestId('collections-list')).toBeVisible();
+
+    await page.getByTestId('nav-watchlist').click();
+    await expect(page.getByTestId('watch-alerts')).toBeVisible();
+
+    await page.getByTestId('nav-brief').click();
+    await expect(page.getByTestId('brief-content')).toBeVisible();
+
+    await page.getByTestId('nav-ideas').click();
+    await expect(page.getByTestId('ideas-list')).toBeVisible();
+
     await page.locator('[data-nav="settings"]').click();
     await expect(page.getByTestId('settings-form')).toBeVisible();
 
@@ -114,6 +126,71 @@ test.describe('Radar idees e2e', () => {
     await page.locator('[data-radar-days="7"]').click();
     await expect(page.locator('[data-radar-days="7"]')).toHaveClass(/is-active/);
     await expect(page.getByTestId('radar-list')).toBeVisible();
+  });
+});
+
+test.describe('Suite idees e2e', () => {
+  test('API collections / watchlist / brief / ideas', async ({ request }) => {
+    const cols = await request.get('/api/collections');
+    expect(cols.ok()).toBeTruthy();
+    const colsBody = await cols.json();
+    expect(Array.isArray(colsBody.collections)).toBeTruthy();
+    expect(colsBody.collections.length).toBeGreaterThan(0);
+
+    const watchKw = await request.get('/api/watchlist/keywords');
+    expect(watchKw.ok()).toBeTruthy();
+    const watchBody = await watchKw.json();
+    expect(watchBody).toHaveProperty('keywords');
+
+    const alerts = await request.get('/api/watchlist/alerts?days=14&limit=10');
+    expect(alerts.ok()).toBeTruthy();
+    const alertsBody = await alerts.json();
+    expect(alertsBody).toHaveProperty('alerts');
+
+    const brief = await request.get('/api/brief/weekly');
+    expect(brief.ok()).toBeTruthy();
+    const briefBody = await brief.json();
+    expect(briefBody).toHaveProperty('topics');
+
+    const ideas = await request.get('/api/ideas?limit=10');
+    expect(ideas.ok()).toBeTruthy();
+    const ideasBody = await ideas.json();
+    expect(ideasBody).toHaveProperty('ideas');
+
+    const created = await request.post('/api/ideas', {
+      data: { title: 'E2E fiche', theme: 'saas', status: 'draft' },
+    });
+    expect(created.ok()).toBeTruthy();
+    const note = await created.json();
+    expect(note.id).toBeTruthy();
+
+    const md = await request.get(`/api/ideas/${note.id}/markdown`);
+    expect(md.ok()).toBeTruthy();
+    const mdBody = await md.json();
+    expect(mdBody.markdown).toContain('E2E fiche');
+
+    const del = await request.delete(`/api/ideas/${note.id}`);
+    expect(del.ok()).toBeTruthy();
+  });
+
+  test('nav Collections Watchlist Brief Fiches', async ({ page }) => {
+    await page.goto('/');
+
+    await page.getByTestId('nav-collections').click();
+    await expect(page.getByRole('heading', { name: /^Collections$/i })).toBeVisible();
+    await expect(page.getByTestId('collections-list')).toBeVisible({ timeout: 15_000 });
+
+    await page.getByTestId('nav-watchlist').click();
+    await expect(page.getByRole('heading', { name: /^Watchlist$/i })).toBeVisible();
+    await expect(page.getByTestId('watch-keywords')).toBeVisible();
+
+    await page.getByTestId('nav-brief').click();
+    await expect(page.getByRole('heading', { name: /Brief hebdo/i })).toBeVisible();
+    await expect(page.getByTestId('brief-content')).toBeVisible({ timeout: 20_000 });
+
+    await page.getByTestId('nav-ideas').click();
+    await expect(page.getByRole('heading', { name: /Fiches idee/i })).toBeVisible();
+    await expect(page.getByTestId('ideas-list')).toBeVisible({ timeout: 15_000 });
   });
 });
 

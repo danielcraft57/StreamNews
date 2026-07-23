@@ -114,13 +114,22 @@ def score_bucket(
     article_count: int,
     site_count: int,
     recency_bonus: float,
-) -> float:
-    """Score opportunite (v1 deterministe)."""
+) -> Dict[str, float]:
+    """Score opportunite + decomposition (frequence / nouveaute / intent)."""
     diversity = 1.0 + 0.25 * max(0, site_count - 1)
     volume = 1.0 + 0.12 * max(0, article_count - 1)
     intent_part = float(intent_weight) + (0.4 * max(0, intent_hits - 1))
     theme_bonus = 1.5 if intent_hits else 0.8
-    return round((intent_part + theme_bonus) * volume * diversity + recency_bonus, 2)
+    base = (intent_part + theme_bonus) * volume * diversity
+    total = round(base + recency_bonus, 2)
+    if intent_hits == 0:
+        total = round(total * 0.55, 2)
+    return {
+        "total": total,
+        "intent": round(intent_part, 2),
+        "frequency": round(volume * diversity, 2),
+        "novelty": round(float(recency_bonus), 2),
+    }
 
 
 class IdeaRadarService:
@@ -179,30 +188,55 @@ class IdeaRadarService:
                 await conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_radar_theme ON radar_ideas(theme)"
                 )
+            # Colonne optionnelle score_breakdown (idempotent)
+            try:
+                await conn.execute(
+                    "ALTER TABLE radar_ideas ADD COLUMN score_breakdown TEXT"
+                )
+            except Exception:
+                pass
 
     async def compute(
         self,
         *,
         window_days: int = 30,
         limit: int = 40,
+        site_ids: Optional[List[int]] = None,
     ) -> List[Dict[str, Any]]:
         window_days = max(1, min(int(window_days or 30), 365))
         limit = max(1, min(int(limit or 40), 100))
         since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=window_days)
         now = datetime.now(timezone.utc).replace(tzinfo=None)
+        ids = [int(x) for x in (site_ids or []) if x is not None]
 
         async with self.db.pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT id, site_id, title, summary, content_text,
-                       COALESCE(fetched_at, published_at) AS seen_at
-                FROM articles
-                WHERE COALESCE(fetched_at, published_at) >= $1
-                ORDER BY COALESCE(fetched_at, published_at) DESC
-                LIMIT 2000
-                """,
-                since,
-            )
+            if ids:
+                placeholders = ", ".join(f"${i + 2}" for i in range(len(ids)))
+                rows = await conn.fetch(
+                    f"""
+                    SELECT id, site_id, title, summary, content_text,
+                           COALESCE(fetched_at, published_at) AS seen_at
+                    FROM articles
+                    WHERE COALESCE(fetched_at, published_at) >= $1
+                      AND site_id IN ({placeholders})
+                    ORDER BY COALESCE(fetched_at, published_at) DESC
+                    LIMIT 2000
+                    """,
+                    since,
+                    *ids,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, site_id, title, summary, content_text,
+                           COALESCE(fetched_at, published_at) AS seen_at
+                    FROM articles
+                    WHERE COALESCE(fetched_at, published_at) >= $1
+                    ORDER BY COALESCE(fetched_at, published_at) DESC
+                    LIMIT 2000
+                    """,
+                    since,
+                )
 
         buckets: Dict[str, Dict[str, Any]] = {}
 
@@ -281,15 +315,14 @@ class IdeaRadarService:
             # Drop theme-only with a single weak article and no intent
             if intent_hits == 0 and count < 2:
                 continue
-            score = score_bucket(
+            score_parts = score_bucket(
                 intent_weight=item["intent_weight"] or (1.0 if intent_hits == 0 else 0.0),
                 intent_hits=intent_hits or (1 if item["intent_weight"] else 0),
                 article_count=count,
                 site_count=len(item["site_ids"]),
                 recency_bonus=item["recency_bonus"],
             )
-            if intent_hits == 0:
-                score = round(score * 0.55, 2)
+            score = score_parts["total"]
             intents_list = sorted(item["intent_keys"])
             label = THEME_LABELS.get(item["theme"], item["theme"])
             if intents_list:
@@ -300,6 +333,11 @@ class IdeaRadarService:
                     "theme": item["theme"],
                     "title": label[:500],
                     "score": score,
+                    "score_breakdown": {
+                        "intent": score_parts["intent"],
+                        "frequency": score_parts["frequency"],
+                        "novelty": score_parts["novelty"],
+                    },
                     "intent_count": intent_hits,
                     "article_count": count,
                     "window_days": window_days,
@@ -313,9 +351,17 @@ class IdeaRadarService:
         scored.sort(key=lambda x: (-x["score"], -x["article_count"], x["theme"]))
         return scored[:limit]
 
-    async def refresh(self, *, window_days: int = 30, limit: int = 40) -> Dict[str, Any]:
+    async def refresh(
+        self,
+        *,
+        window_days: int = 30,
+        limit: int = 40,
+        site_ids: Optional[List[int]] = None,
+    ) -> Dict[str, Any]:
         await self.ensure_table()
-        ideas = await self.compute(window_days=window_days, limit=limit)
+        ideas = await self.compute(
+            window_days=window_days, limit=limit, site_ids=site_ids
+        )
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         async with self.db.pool.acquire() as conn:
@@ -328,8 +374,9 @@ class IdeaRadarService:
                     """
                     INSERT INTO radar_ideas (
                         theme, title, score, intent_count, article_count, window_days,
-                        sample_titles, sample_snippets, evidence_ids, intents, computed_at
-                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                        sample_titles, sample_snippets, evidence_ids, intents,
+                        score_breakdown, computed_at
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
                     """,
                     idea["theme"],
                     idea["title"],
@@ -341,6 +388,7 @@ class IdeaRadarService:
                     json.dumps(idea.get("sample_snippets") or [], ensure_ascii=False),
                     json.dumps(idea.get("evidence_ids") or [], ensure_ascii=False),
                     json.dumps(idea.get("intents") or [], ensure_ascii=False),
+                    json.dumps(idea.get("score_breakdown") or {}, ensure_ascii=False),
                     now,
                 )
 
@@ -371,34 +419,60 @@ class IdeaRadarService:
             args.append(limit)
             sql = f"""
                 SELECT theme, title, score, intent_count, article_count, window_days,
-                       sample_titles, sample_snippets, evidence_ids, intents, computed_at
+                       sample_titles, sample_snippets, evidence_ids, intents,
+                       score_breakdown, computed_at
                 FROM radar_ideas
                 WHERE {' AND '.join(clauses)}
                 ORDER BY score DESC, article_count DESC
                 LIMIT ${len(args)}
             """
-            rows = await conn.fetch(sql, *args)
+            try:
+                rows = await conn.fetch(sql, *args)
+            except Exception:
+                # Ancienne table sans score_breakdown
+                sql = f"""
+                    SELECT theme, title, score, intent_count, article_count, window_days,
+                           sample_titles, sample_snippets, evidence_ids, intents, computed_at
+                    FROM radar_ideas
+                    WHERE {' AND '.join(clauses)}
+                    ORDER BY score DESC, article_count DESC
+                    LIMIT ${len(args)}
+                """
+                rows = await conn.fetch(sql, *args)
 
         ideas = []
         computed_at = None
         for row in rows:
-            def _loads(raw):
+            def _loads(raw, default=None):
+                if default is None:
+                    default = []
                 if isinstance(raw, str):
                     try:
                         return json.loads(raw)
                     except json.JSONDecodeError:
-                        return []
-                return raw if isinstance(raw, list) else []
+                        return default
+                if raw is None:
+                    return default
+                return raw
 
             ca = row["computed_at"]
             if ca and hasattr(ca, "isoformat"):
                 ca = ca.isoformat()
                 computed_at = computed_at or ca
+            score = float(row["score"] or 0)
+            breakdown = _loads(row["score_breakdown"], {}) if "score_breakdown" in row.keys() else {}
+            if not isinstance(breakdown, dict) or not breakdown:
+                breakdown = {
+                    "intent": round(score * 0.45, 2),
+                    "frequency": round(score * 0.35, 2),
+                    "novelty": round(score * 0.2, 2),
+                }
             ideas.append(
                 {
                     "theme": row["theme"],
                     "title": row["title"],
-                    "score": float(row["score"] or 0),
+                    "score": score,
+                    "score_breakdown": breakdown,
                     "intent_count": int(row["intent_count"] or 0),
                     "article_count": int(row["article_count"] or 0),
                     "window_days": int(row["window_days"] or window_days),
