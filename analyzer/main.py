@@ -23,7 +23,7 @@ from celery_worker import (
 from services.text_analysis_service import available_analyzers
 from celery_app import celery_app
 
-app = FastAPI(title="StreamNews Analyzer", version="0.5.0")
+app = FastAPI(title="StreamNews Analyzer", version="0.5.1")
 
 # Initialisation de la base de données
 db = Database()

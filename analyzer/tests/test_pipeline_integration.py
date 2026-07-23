@@ -170,8 +170,8 @@ async def test_delete_site_cascades_pages_and_articles(db, site_id):
 
 @pytest.mark.asyncio
 async def test_ingest_rss_articles_from_mocked_feed(db, site_id, monkeypatch):
-    """ingest_rss_articles avec feedparser mocke (pas de reseau)."""
-    import feedparser
+    """ingest_rss_articles avec HTTP + feedparser mockes (pas de reseau)."""
+    from unittest.mock import MagicMock
 
     entry = type("Entry", (), {})()
     entry.title = "Flux mock"
@@ -193,7 +193,11 @@ async def test_ingest_rss_articles_from_mocked_feed(db, site_id, monkeypatch):
     }.get(k, d)
 
     parsed = type("Parsed", (), {"entries": [entry]})()
-    monkeypatch.setattr(feedparser, "parse", lambda url: parsed)
+    resp = MagicMock()
+    resp.content = b"<rss/>"
+    resp.raise_for_status = MagicMock()
+    monkeypatch.setattr("services.ingest_service.requests.get", lambda *a, **k: resp)
+    monkeypatch.setattr("services.ingest_service.feedparser.parse", lambda raw: parsed)
 
     feeds = [{"url": "https://example.com/rss", "title": "RSS"}]
     count = await db.ingest_rss_articles(site_id, feeds)
