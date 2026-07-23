@@ -76,7 +76,9 @@ Detail secrets : README → section CI/CD.
 ## Limites
 
 - Pi 2 : `CELERY_CONCURRENCY=1`
-- Celery beat : un seul noeud (sinon double brief). Unit `streamnews-beat.service`, cron brief quotidien 06:00 UTC
+- Celery beat : un seul noeud (sinon double brief / double poll RSS). Unit `streamnews-beat.service`
+  - brief quotidien 06:00 UTC
+  - **rechargement RSS** toutes les `FEED_REFRESH_MINUTES` (defaut **15** min)
 - Redis ouvert sur le LAN sans auth : OK en lab isole, **jamais** expose Internet
 - Bastion CD ≠ edge nginx (souvent node9 vs node12)
 

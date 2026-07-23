@@ -7,6 +7,7 @@ from time import mktime
 from typing import List, Optional
 
 import feedparser
+import requests
 
 from logging_config import get_logger
 from models import ArticleCandidate, IngestFeedResult
@@ -33,8 +34,6 @@ class IngestService:
         """Parse synchrone (feedparser) - a lancer dans un worker Celery."""
         articles: List[ArticleCandidate] = []
         try:
-            import requests
-
             # Timeout reseau : sinon un flux mort bloque le chord Celery.
             resp = requests.get(
                 feed_url,

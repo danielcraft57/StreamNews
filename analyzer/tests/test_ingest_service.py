@@ -19,6 +19,21 @@ def _entry(**kwargs):
     return e
 
 
+def _mock_http_and_parse(monkeypatch, parsed):
+    """IngestService telecharge via requests puis parse le body."""
+    resp = MagicMock()
+    resp.content = b"<rss/>"
+    resp.raise_for_status = MagicMock()
+    monkeypatch.setattr(
+        "services.ingest_service.requests.get",
+        lambda *a, **k: resp,
+    )
+    monkeypatch.setattr(
+        "services.ingest_service.feedparser.parse",
+        lambda raw: parsed,
+    )
+
+
 def test_parse_feed_extracts_articles(monkeypatch):
     parsed = MagicMock()
     parsed.entries = [
@@ -36,10 +51,7 @@ def test_parse_feed_extracts_articles(monkeypatch):
         ),
         _entry(title="Sans lien", link=""),
     ]
-    monkeypatch.setattr(
-        "services.ingest_service.feedparser.parse",
-        lambda url: parsed,
-    )
+    _mock_http_and_parse(monkeypatch, parsed)
 
     svc = IngestService(max_entries=10)
     articles = svc.parse_feed("https://example.com/rss")
@@ -60,10 +72,7 @@ def test_parse_feed_truncates_long_summary(monkeypatch):
             summary="x" * 5000,
         ),
     ]
-    monkeypatch.setattr(
-        "services.ingest_service.feedparser.parse",
-        lambda url: parsed,
-    )
+    _mock_http_and_parse(monkeypatch, parsed)
 
     svc = IngestService(summary_max_len=100)
     articles = svc.parse_feed("https://example.com/rss")
@@ -73,10 +82,10 @@ def test_parse_feed_truncates_long_summary(monkeypatch):
 
 
 def test_parse_feed_handles_parse_error(monkeypatch):
-    def _boom(_url):
+    def _boom(*_a, **_k):
         raise RuntimeError("network down")
 
-    monkeypatch.setattr("services.ingest_service.feedparser.parse", _boom)
+    monkeypatch.setattr("services.ingest_service.requests.get", _boom)
     articles = IngestService().parse_feed("https://example.com/rss")
     assert articles == []
 
@@ -90,10 +99,7 @@ def test_parse_feed_published_date(monkeypatch):
             published_parsed=(2026, 7, 19, 10, 0, 0, 0, 0, 0),
         ),
     ]
-    monkeypatch.setattr(
-        "services.ingest_service.feedparser.parse",
-        lambda url: parsed,
-    )
+    _mock_http_and_parse(monkeypatch, parsed)
 
     articles = IngestService().parse_feed("https://example.com/rss")
     assert isinstance(articles[0].published_at, datetime)

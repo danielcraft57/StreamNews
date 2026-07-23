@@ -1,10 +1,13 @@
 """Celery app unique + queues specialisees crawl / ingest."""
 import os
+from datetime import timedelta
 
 from celery import Celery
 from celery.schedules import crontab
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+# Intervalle rechargement RSS (minutes). Defaut 15 = quasi temps reel pour un flux.
+FEED_REFRESH_MINUTES = max(5, min(int(os.getenv("FEED_REFRESH_MINUTES", "15") or 15), 180))
 
 celery_app = Celery("streamnews")
 celery_app.conf.update(
@@ -28,6 +31,7 @@ celery_app.conf.update(
         "streamnews.enrich_site_articles": {"queue": "ingest"},
         "streamnews.finalize_analysis": {"queue": "default"},
         "streamnews.refresh_daily_brief": {"queue": "default"},
+        "streamnews.refresh_all_feeds": {"queue": "default"},
         # compat anciens noms
         "celery_worker.analyze_site_task": {"queue": "crawl"},
         "celery_worker.cleanup_old_analyses": {"queue": "default"},
@@ -36,6 +40,10 @@ celery_app.conf.update(
         "daily-brief-0600-utc": {
             "task": "streamnews.refresh_daily_brief",
             "schedule": crontab(hour=6, minute=0),
+        },
+        "refresh-all-feeds": {
+            "task": "streamnews.refresh_all_feeds",
+            "schedule": timedelta(minutes=FEED_REFRESH_MINUTES),
         },
     },
 )

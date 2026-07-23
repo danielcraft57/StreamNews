@@ -416,6 +416,9 @@ app.post('/api/sites/:id/ingest-articles', async (req, res) => {
     }
 });
 
+app.post('/api/feeds/refresh-all', (req, res) =>
+    proxyAnalyzer(req, res, { method: 'post', path: '/feeds/refresh-all', timeout: 30000 }));
+
 app.get('/api/articles/:id', async (req, res) => {
     try {
         const response = await axios.get(`${ANALYZER_URL}/articles/${req.params.id}`, {

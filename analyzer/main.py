@@ -18,6 +18,7 @@ from celery_worker import (
     analyze_site_articles_task,
     enrich_article_task,
     enrich_site_articles_task,
+    refresh_all_feeds_task,
 )
 from services.text_analysis_service import available_analyzers
 from celery_app import celery_app
@@ -626,6 +627,20 @@ async def ingest_site_articles(site_id: int):
         return {"site_id": site_id, "articles_count": count}
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/feeds/refresh-all")
+async def feeds_refresh_all():
+    """Enqueue le rechargement de tous les flux (meme tache que le cron beat)."""
+    try:
+        async_result = refresh_all_feeds_task.delay()
+        return {
+            "status": "queued",
+            "task_id": async_result.id,
+            "message": "Rechargement des flux en file d'attente",
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

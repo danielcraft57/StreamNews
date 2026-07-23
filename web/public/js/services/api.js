@@ -17,6 +17,7 @@ export const api = {
     getSite: (id) => request(`/api/sites/${id}`),
     deleteSite: (id) => request(`/api/sites/${id}`, { method: 'DELETE' }),
     analyze: (body) => request('/api/analyze', { method: 'POST', body: JSON.stringify(body) }),
+    refreshAllFeeds: () => request('/api/feeds/refresh-all', { method: 'POST' }),
     stopSite: (id) => request(`/api/sites/${id}/stop`, { method: 'POST' }),
     ingestArticles: (id) => request(`/api/sites/${id}/ingest-articles`, { method: 'POST' }),
     enrichArticles: (id, limit = 50) =>

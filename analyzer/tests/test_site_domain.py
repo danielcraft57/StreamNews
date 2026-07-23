@@ -133,7 +133,8 @@ async def test_update_site_status_can_replace_feeds(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_ensure_site_domain_unique_merges_duplicates():
+async def test_ensure_site_domain_unique_merges_duplicates(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@localhost/db")
     db = Database()
     mock_conn = AsyncMock()
     mock_conn.fetch = AsyncMock(
