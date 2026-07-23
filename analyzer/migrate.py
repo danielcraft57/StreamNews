@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -10,6 +11,9 @@ from alembic.config import Config
 
 _ANALYZER_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _ANALYZER_DIR.parent
+
+# Cle stable pour serialiser les upgrades concurrentes (flotte parallele).
+_PG_MIGRATION_LOCK_KEY = 872_014_305
 
 
 def _sync_database_url(url: str) -> str:
@@ -55,20 +59,45 @@ def alembic_config(database_url: str | None = None) -> Config:
     return cfg
 
 
+@contextmanager
+def _postgres_migration_lock(url: str):
+    """Serialise alembic entre noeuds (deploy-fleet parallele + init_db au boot).
+
+    Lock session-level en AUTOCOMMIT : survit aux commit Alembic sur d'autres connexions.
+    """
+    if not url.startswith("postgresql"):
+        yield
+        return
+    import sqlalchemy as sa
+
+    engine = sa.create_engine(url)
+    conn = engine.connect().execution_options(isolation_level="AUTOCOMMIT")
+    try:
+        conn.execute(sa.text("SELECT pg_advisory_lock(:k)"), {"k": _PG_MIGRATION_LOCK_KEY})
+        try:
+            yield
+        finally:
+            conn.execute(sa.text("SELECT pg_advisory_unlock(:k)"), {"k": _PG_MIGRATION_LOCK_KEY})
+    finally:
+        conn.close()
+        engine.dispose()
+
+
 def run_migrations(database_url: str | None = None, *, reset: bool = False) -> str:
     """Applique les migrations. reset=True : downgrade base puis upgrade head."""
     url = _sync_database_url(database_url or os.getenv("DATABASE_URL", "sqlite:///./data/streamnews.db"))
     _ensure_sqlite_parent(url)
     cfg = alembic_config(url)
     cfg.set_main_option("sqlalchemy.url", url)
-    if reset:
-        # SQLite neuf : pas de downgrade (fichier absent).
-        # Postgres / SQLite existant : recreate complete.
-        if url.startswith("sqlite:") and not _sqlite_db_exists(url):
-            pass
-        else:
-            command.downgrade(cfg, "base")
-    command.upgrade(cfg, "head")
+    with _postgres_migration_lock(url):
+        if reset:
+            # SQLite neuf : pas de downgrade (fichier absent).
+            # Postgres / SQLite existant : recreate complete.
+            if url.startswith("sqlite:") and not _sqlite_db_exists(url):
+                pass
+            else:
+                command.downgrade(cfg, "base")
+        command.upgrade(cfg, "head")
     _repair_schema_after_upgrade(url)
     return "head"
 

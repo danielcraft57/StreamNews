@@ -69,7 +69,11 @@ bash scripts/dev.sh --local
 
 ## CD
 
-GitHub Actions SSH vers le **bastion** (`DEPLOY_HOST`, ex. node9), puis `deploy/deploy-fleet.sh` deploie node6/7/8 en parallele.
+GitHub Actions SSH vers le **bastion** (`DEPLOY_HOST`, ex. node9), puis `deploy/deploy-fleet.sh` :
+1. noeud data en premier (1er de `FLEET_HOSTS`, ex. node6) pour Alembic
+2. app/worker en parallele ensuite
+
+Les migrations ne tournent que sur le role `data` (ou `all` mono-noeud). Un advisory lock Postgres reste un filet de securite. Si `.env` dit `data` par erreur sur un noeud app/worker, `deploy.sh` recalcule le role via les units systemd.
 
 Detail secrets : README → section CI/CD.
 

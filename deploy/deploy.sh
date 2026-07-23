@@ -28,10 +28,31 @@ set +a
 ROLE="${STREAMNEWS_ROLE:-all}"
 BRANCH="${DEPLOY_BRANCH:-main}"
 
+UNITS="$(systemctl list-unit-files 2>/dev/null || true)"
+has_app=false
+has_worker=false
+if echo "$UNITS" | grep -qE '^streamnews-(web|analyzer)\.'; then
+  has_app=true
+fi
+if echo "$UNITS" | grep -qE '^streamnews-worker\.'; then
+  has_worker=true
+fi
+
 # Ancien .env data copie depuis .env.example (ROLE=all) sans units app/worker
-if [[ "$ROLE" == "all" ]] && ! systemctl list-unit-files 2>/dev/null | grep -q '^streamnews-'; then
+if [[ "$ROLE" == "all" ]] && ! echo "$UNITS" | grep -q '^streamnews-'; then
   echo "WARN: STREAMNEWS_ROLE=all mais aucun unit streamnews -> role=data"
   ROLE=data
+fi
+
+# .env mal copie (ex: STREAMNEWS_ROLE=data sur node7/node8) : corrige via units
+if [[ "$ROLE" == "data" ]]; then
+  if [[ "$has_app" == true ]]; then
+    echo "WARN: STREAMNEWS_ROLE=data mais units app presents -> role=app"
+    ROLE=app
+  elif [[ "$has_worker" == true ]]; then
+    echo "WARN: STREAMNEWS_ROLE=data mais unit worker present -> role=worker"
+    ROLE=worker
+  fi
 fi
 
 # Commandes fichier (repo owned by streamnews).
@@ -84,13 +105,19 @@ case "$ROLE" in
     sys status streamnews-worker || true
     ;;
   app|all)
+    # Migrations : role data (flotte) ou all (mono-noeud). Sur app pur on skip
+    # pour eviter une course alembic avec node data (deploy-fleet parallele).
     as_app '
       if [[ ! -d .venv ]]; then python3 -m venv .venv; fi
       source .venv/bin/activate
       pip install --upgrade pip
       pip install -r analyzer/requirements.txt
       ( cd web && npm ci --omit=dev )
-      ( cd analyzer && python -c "from database import Database; import asyncio; asyncio.run(Database().init_db())" )
+      if [[ "'"$ROLE"'" == "all" ]]; then
+        ( cd analyzer && python -c "from database import Database; import asyncio; asyncio.run(Database().init_db())" )
+      else
+        echo "Role=app : skip init_db (schema gere par le noeud data)"
+      fi
     '
     sys daemon-reload
     if [[ "$ROLE" == "all" ]] || systemctl list-unit-files | grep -q streamnews-analyzer; then

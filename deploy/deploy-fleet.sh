@@ -8,7 +8,7 @@
 #   FLEET_USER=pi
 #   DEPLOY_PATH=/opt/streamnews
 #
-# Les noeuds partent en parallele (pip/npm en meme temps) pour couper le temps CD.
+# Les noeuds app/worker partent en parallele apres le noeud data (1er de FLEET_HOSTS).
 # L'edge nginx public (ex: node12) est un autre role : reload ici seulement si le
 # vhost StreamNews est present sur CE bastion.
 set -euo pipefail
@@ -18,17 +18,14 @@ DEPLOY_PATH="${DEPLOY_PATH:-/opt/streamnews}"
 FLEET_HOSTS="${FLEET_HOSTS:-node6.lan node7.lan node8.lan}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-echo "==> Fleet deploy parallele depuis $(hostname -s) -> $FLEET_HOSTS"
+echo "==> Fleet deploy depuis $(hostname -s) -> $FLEET_HOSTS"
 
 LOG_DIR="$(mktemp -d)"
 trap 'rm -rf "$LOG_DIR"' EXIT
 
-declare -a HOSTS_ARR=()
-declare -a PIDS=()
-
-for host in $FLEET_HOSTS; do
-  HOSTS_ARR+=("$host")
-  log="$LOG_DIR/${host}.log"
+deploy_one() {
+  local host="$1"
+  local log="$2"
   (
     set +e
     echo "==> debut deploy $host"
@@ -50,14 +47,47 @@ for host in $FLEET_HOSTS; do
       echo "==> fin deploy $host OK"
     fi
     exit "$ec"
-  ) >"$log" 2>&1 &
+  ) >"$log" 2>&1
+}
+
+declare -a HOSTS_ARR=()
+for host in $FLEET_HOSTS; do
+  HOSTS_ARR+=("$host")
+done
+
+if [[ ${#HOSTS_ARR[@]} -eq 0 ]]; then
+  echo "ERREUR: FLEET_HOSTS vide"
+  exit 1
+fi
+
+# Premier hote = data (convention FLEET_HOSTS) : migrations avant le reste.
+DATA_HOST="${HOSTS_ARR[0]}"
+echo "==> phase data (migrations) : $DATA_HOST"
+set +e
+deploy_one "$DATA_HOST" "$LOG_DIR/${DATA_HOST}.log"
+data_ec=$?
+set -e
+echo ""
+echo "========== $DATA_HOST =========="
+cat "$LOG_DIR/${DATA_HOST}.log"
+if [[ "$data_ec" -ne 0 ]]; then
+  echo "==> Fleet deploy termine AVEC ERREURS (data)"
+  exit 1
+fi
+
+declare -a PIDS=()
+declare -a REST_HOSTS=()
+for host in "${HOSTS_ARR[@]:1}"; do
+  REST_HOSTS+=("$host")
+  log="$LOG_DIR/${host}.log"
+  deploy_one "$host" "$log" &
   PIDS+=($!)
   echo "lance: $host (pid ${PIDS[-1]})"
 done
 
 failed=0
 for i in "${!PIDS[@]}"; do
-  host="${HOSTS_ARR[$i]}"
+  host="${REST_HOSTS[$i]}"
   pid="${PIDS[$i]}"
   set +e
   wait "$pid"
