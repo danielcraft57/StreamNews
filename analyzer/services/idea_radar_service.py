@@ -10,14 +10,16 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 # (key, pattern, weight)
 INTENT_PATTERNS: List[Tuple[str, re.Pattern[str], float]] = [
     ("id_pay", re.compile(r"\bi'?d\s+pay\b|\bje\s+paier?ais\b|\bwilling\s+to\s+pay\b", re.I), 3.5),
-    ("looking_for", re.compile(r"\blooking\s+for\b|\ba\s+la\s+recherche\b|\bcherche\s+un\s+(outil|logiciel|saas)\b", re.I), 3.0),
-    ("alternative_to", re.compile(r"\balternative\s+to\b|\balternative\s+[aà]\b|\bremplacer\b|\binstead\s+of\b", re.I), 3.0),
+    ("looking_for", re.compile(r"\blooking\s+for\b|\ba\s+la\s+recherche\b|\bcherche\s+un\s+(outil|logiciel|saas)\b|\banyone\s+know\b|\bquelqu'?un\s+connait\b", re.I), 3.0),
+    ("alternative_to", re.compile(r"\balternative\s+to\b|\balternative\s+[aà]\b|\bremplacer\b|\binstead\s+of\b|\bopen[\s-]?source\s+alternative\b", re.I), 3.0),
     ("wish_existed", re.compile(r"\bwish\s+(there\s+was|i\s+had)\b|\bsi\s+seulement\b|\bj'?aimerais\s+qu'?il\s+existe\b", re.I), 3.2),
-    ("frustrated", re.compile(r"\bfrustrated\s+with\b|\bfed\s+up\b|\bmarre\s+de\b|\bpenible\b|\bpénible\b", re.I), 2.8),
-    ("need_tool", re.compile(r"\bbesoin\s+d'?un\s+outil\b|\bneed\s+a\s+(tool|app|saas)\b|\bquelqu'?un\s+connait\b", re.I), 3.0),
+    ("frustrated", re.compile(r"\bfrustrated\s+with\b|\bfed\s+up\b|\bmarre\s+de\b|\bpenible\b|\bpénible\b|\bhate\s+(using|this)\b", re.I), 2.8),
+    ("need_tool", re.compile(r"\bbesoin\s+d'?un\s+outil\b|\bneed\s+a\s+(tool|app|saas)\b|\brecommend\s+a\s+(tool|app|saas)\b", re.I), 3.0),
     ("build_in_public", re.compile(r"\bbuild\s+in\s+public\b|\bindie\s+hacker\b|\bmrr\b|\bbootstrapp", re.I), 2.2),
-    ("launch", re.compile(r"\blaunch(ing|ed)?\b|\blance(r|ment)\b|\bmvp\b|\bproduct\s+hunt\b", re.I), 2.0),
+    ("launch", re.compile(r"\blaunch(ing|ed)?\b|\blance(r|ment)\b|\bmvp\b|\bproduct\s+hunt\b|\bshow\s+hn\b", re.I), 2.0),
+    ("ask_hn", re.compile(r"\bask\s+hn\b|\bask\s+hn:\b", re.I), 2.6),
     ("pricing_pain", re.compile(r"\btoo\s+expensive\b|\btrop\s+cher\b|\bpricing\b|\btarif", re.I), 2.4),
+    ("self_host_pain", re.compile(r"\bself[\s-]?host(ing)?\b|\bon[\s-]?prem\b|\bhomelab\b", re.I), 2.3),
 ]
 
 THEME_KEYWORDS: Dict[str, Sequence[str]] = {
@@ -54,7 +56,9 @@ INTENT_LABELS = {
     "need_tool": "Besoin d'un outil",
     "build_in_public": "Build in public",
     "launch": "Lancement / MVP",
+    "ask_hn": "Ask HN",
     "pricing_pain": "Douleur pricing",
+    "self_host_pain": "Self-host",
 }
 
 

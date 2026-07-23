@@ -51,5 +51,8 @@ export function renderCollectionDetail(col, allSites = []) {
         </form>
         <md-outlined-button type="button" data-collection-open-radar="${escapeAttr(String(col.id))}" style="width:100%;margin-top:12px">
             Voir le radar filtre
+        </md-outlined-button>
+        <md-outlined-button type="button" data-collection-open-trends="${escapeAttr(String(col.id))}" style="width:100%;margin-top:8px">
+            Voir les tendances filtrees
         </md-outlined-button>`;
 }

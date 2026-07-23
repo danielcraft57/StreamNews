@@ -158,6 +158,15 @@ test.describe('Suite idees e2e', () => {
     expect(dailyBody).toHaveProperty('topics');
     expect(dailyBody.period || dailyBody.day).toBeTruthy();
 
+    const colId = colsBody.collections[0]?.id;
+    if (colId) {
+      const trendsCol = await request.get(`/api/trends?days=30&limit=5&collection_id=${colId}`);
+      expect(trendsCol.ok()).toBeTruthy();
+      const trendsColBody = await trendsCol.json();
+      expect(trendsColBody).toHaveProperty('trends');
+      expect(trendsColBody.collection_id).toBe(colId);
+    }
+
     const ideas = await request.get('/api/ideas?limit=10');
     expect(ideas.ok()).toBeTruthy();
     const ideasBody = await ideas.json();

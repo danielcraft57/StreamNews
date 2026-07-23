@@ -8,7 +8,7 @@ Pas de Docker. Roles fixes sur le LAN.
 |-----------------|------|----------|
 | **node6** | `data` | PostgreSQL + Redis |
 | **node7** | `app` | web + analyzer (**sans** worker) |
-| **node8+** | `worker` | Celery (`crawl`, `ingest`, `default`) |
+| **node8+** | `worker` | Celery (`crawl`, `ingest`, `default`) + **beat** (brief quotidien) |
 | **node9** | bastion SSH | point d'entree CD (GitHub Actions) |
 | **node12** | edge nginx | HTTPS public → proxy vers node7 |
 | **node14** | Redis local-dev | broker pour le mode local PC (SQLite) |
@@ -76,6 +76,7 @@ Detail secrets : README → section CI/CD.
 ## Limites
 
 - Pi 2 : `CELERY_CONCURRENCY=1`
+- Celery beat : un seul noeud (sinon double brief). Unit `streamnews-beat.service`, cron brief quotidien 06:00 UTC
 - Redis ouvert sur le LAN sans auth : OK en lab isole, **jamais** expose Internet
 - Bastion CD ≠ edge nginx (souvent node9 vs node12)
 

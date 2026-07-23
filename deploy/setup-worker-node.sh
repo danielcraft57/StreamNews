@@ -86,11 +86,37 @@ EOF
 systemctl daemon-reload
 systemctl enable --now streamnews-worker
 
+# Beat (brief quotidien 06:00 UTC) — un seul noeud suffit
+cat > /etc/systemd/system/streamnews-beat.service <<EOF
+[Unit]
+Description=StreamNews Celery Beat
+After=network.target
+
+[Service]
+Type=simple
+User=$APP_USER
+Group=$APP_USER
+WorkingDirectory=$APP_DIR/analyzer
+EnvironmentFile=$APP_DIR/.env
+Environment=PATH=$APP_DIR/.venv/bin:/usr/bin
+ExecStart=$APP_DIR/.venv/bin/python -m celery -A celery_worker beat --loglevel=info
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now streamnews-beat
+
 cat > /etc/sudoers.d/streamnews-deploy <<EOF
 $APP_USER ALL=(root) NOPASSWD: /bin/systemctl daemon-reload
 $APP_USER ALL=(root) NOPASSWD: /bin/systemctl restart streamnews-worker
 $APP_USER ALL=(root) NOPASSWD: /bin/systemctl status streamnews-worker
+$APP_USER ALL=(root) NOPASSWD: /bin/systemctl restart streamnews-beat
+$APP_USER ALL=(root) NOPASSWD: /bin/systemctl status streamnews-beat
 EOF
 chmod 440 /etc/sudoers.d/streamnews-deploy
 
-echo "==> WORKER pret sur $(hostname). Il consomme la queue Redis de $DATA_HOST."
+echo "==> WORKER + BEAT prets sur $(hostname). Queue Redis: $DATA_HOST."

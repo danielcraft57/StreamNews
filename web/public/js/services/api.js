@@ -30,22 +30,24 @@ export const api = {
         if (siteId) params.set('site_id', String(siteId));
         return request(`/api/articles/search?${params}`);
     },
-    getTrends: ({ days = 30, kind = 'all', siteId = null, limit = 40, refresh = false } = {}) => {
+    getTrends: ({ days = 30, kind = 'all', siteId = null, collectionId = null, limit = 40, refresh = false } = {}) => {
         const params = new URLSearchParams({
             days: String(days),
             kind: String(kind || 'all'),
             limit: String(limit),
         });
         if (siteId) params.set('site_id', String(siteId));
+        if (collectionId) params.set('collection_id', String(collectionId));
         if (refresh) params.set('refresh', '1');
         return request(`/api/trends?${params}`);
     },
-    refreshTrends: ({ days = 30, siteId = null, limit = 50 } = {}) => {
+    refreshTrends: ({ days = 30, siteId = null, collectionId = null, limit = 50 } = {}) => {
         const params = new URLSearchParams({
             days: String(days),
             limit: String(limit),
         });
         if (siteId) params.set('site_id', String(siteId));
+        if (collectionId) params.set('collection_id', String(collectionId));
         return request(`/api/trends/refresh?${params}`, { method: 'POST' });
     },
     getRadar: ({ days = 30, theme = 'all', limit = 40, refresh = false, collectionId = null } = {}) => {

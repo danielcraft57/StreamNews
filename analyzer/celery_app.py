@@ -2,6 +2,7 @@
 import os
 
 from celery import Celery
+from celery.schedules import crontab
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
@@ -26,8 +27,15 @@ celery_app.conf.update(
         "streamnews.enrich_article": {"queue": "ingest"},
         "streamnews.enrich_site_articles": {"queue": "ingest"},
         "streamnews.finalize_analysis": {"queue": "default"},
+        "streamnews.refresh_daily_brief": {"queue": "default"},
         # compat anciens noms
         "celery_worker.analyze_site_task": {"queue": "crawl"},
         "celery_worker.cleanup_old_analyses": {"queue": "default"},
+    },
+    beat_schedule={
+        "daily-brief-0600-utc": {
+            "task": "streamnews.refresh_daily_brief",
+            "schedule": crontab(hour=6, minute=0),
+        },
     },
 )

@@ -19,6 +19,13 @@ def test_match_intents_english_and_french():
     assert "need_tool" in keys
 
 
+def test_match_intents_ask_hn_and_self_host():
+    text = "Ask HN: recommend a self-host billing tool. Open source alternative welcome."
+    keys = {k for k, _, _ in match_intents(text)}
+    assert "ask_hn" in keys
+    assert "self_host_pain" in keys or "alternative_to" in keys
+
+
 def test_match_themes_saas_ai():
     text = "Nouveau SaaS B2B avec LLM et RAG pour les equipes."
     themes = match_themes(text)

@@ -203,6 +203,7 @@ app.get('/api/trends', async (req, res) => {
                 limit: req.query.limit || 40,
                 kind: req.query.kind || 'all',
                 ...(req.query.site_id ? { site_id: req.query.site_id } : {}),
+                ...(req.query.collection_id ? { collection_id: req.query.collection_id } : {}),
                 ...(req.query.refresh ? { refresh: req.query.refresh } : {}),
             },
         });
@@ -226,6 +227,9 @@ app.post('/api/trends/refresh', async (req, res) => {
                 limit: req.query.limit || req.body?.limit || 50,
                 ...(req.query.site_id || req.body?.site_id
                     ? { site_id: req.query.site_id || req.body.site_id }
+                    : {}),
+                ...(req.query.collection_id || req.body?.collection_id
+                    ? { collection_id: req.query.collection_id || req.body.collection_id }
                     : {}),
             },
         });

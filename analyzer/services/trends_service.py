@@ -95,11 +95,20 @@ class TrendsService:
         *,
         window_days: int = 7,
         site_id: Optional[int] = None,
+        site_ids: Optional[List[int]] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         window_days = max(1, min(int(window_days or 7), 365))
         limit = max(1, min(int(limit or 50), 100))
         since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=window_days)
+
+        filter_ids: Optional[List[int]] = None
+        if site_ids is not None:
+            filter_ids = [int(x) for x in site_ids if x is not None]
+            if not filter_ids:
+                return []
+        elif site_id is not None:
+            filter_ids = [int(site_id)]
 
         buckets: Dict[Tuple[str, str, Optional[str]], Dict[str, Any]] = {}
 
@@ -122,90 +131,75 @@ class TrendsService:
                     item["titles"].append(title[:120])
             item["weight"] += weight
 
+        async def _fetch(conn, sql_all: str, sql_in: str):
+            if filter_ids is None:
+                return await conn.fetch(sql_all, since)
+            placeholders = ", ".join(f"${i + 2}" for i in range(len(filter_ids)))
+            return await conn.fetch(sql_in.format(placeholders=placeholders), since, *filter_ids)
+
         async with self.db.pool.acquire() as conn:
-            # Meta keywords
-            if site_id:
-                rows = await conn.fetch(
-                    """
-                    SELECT ak.keyword, a.id AS article_id, a.title
-                    FROM article_keywords ak
-                    JOIN articles a ON a.id = ak.article_id
-                    WHERE a.site_id = $1
-                      AND COALESCE(a.fetched_at, a.published_at) >= $2
-                    """,
-                    site_id,
-                    since,
-                )
-            else:
-                rows = await conn.fetch(
-                    """
-                    SELECT ak.keyword, a.id AS article_id, a.title
-                    FROM article_keywords ak
-                    JOIN articles a ON a.id = ak.article_id
-                    WHERE COALESCE(a.fetched_at, a.published_at) >= $1
-                    """,
-                    since,
-                )
+            rows = await _fetch(
+                conn,
+                """
+                SELECT ak.keyword, a.id AS article_id, a.title
+                FROM article_keywords ak
+                JOIN articles a ON a.id = ak.article_id
+                WHERE COALESCE(a.fetched_at, a.published_at) >= $1
+                """,
+                """
+                SELECT ak.keyword, a.id AS article_id, a.title
+                FROM article_keywords ak
+                JOIN articles a ON a.id = ak.article_id
+                WHERE COALESCE(a.fetched_at, a.published_at) >= $1
+                  AND a.site_id IN ({placeholders})
+                """,
+            )
             for row in rows:
                 term = _norm_term(row["keyword"])
                 if _is_useful(term):
                     bump(term, "keyword", None, int(row["article_id"]), row["title"] or "", 1.0)
 
-            # Entities NER
-            if site_id:
-                erows = await conn.fetch(
-                    """
-                    SELECT ae.text, ae.label, a.id AS article_id, a.title
-                    FROM article_entities ae
-                    JOIN articles a ON a.id = ae.article_id
-                    WHERE a.site_id = $1
-                      AND COALESCE(a.fetched_at, a.published_at) >= $2
-                    """,
-                    site_id,
-                    since,
-                )
-            else:
-                erows = await conn.fetch(
-                    """
-                    SELECT ae.text, ae.label, a.id AS article_id, a.title
-                    FROM article_entities ae
-                    JOIN articles a ON a.id = ae.article_id
-                    WHERE COALESCE(a.fetched_at, a.published_at) >= $1
-                    """,
-                    since,
-                )
+            erows = await _fetch(
+                conn,
+                """
+                SELECT ae.text, ae.label, a.id AS article_id, a.title
+                FROM article_entities ae
+                JOIN articles a ON a.id = ae.article_id
+                WHERE COALESCE(a.fetched_at, a.published_at) >= $1
+                """,
+                """
+                SELECT ae.text, ae.label, a.id AS article_id, a.title
+                FROM article_entities ae
+                JOIN articles a ON a.id = ae.article_id
+                WHERE COALESCE(a.fetched_at, a.published_at) >= $1
+                  AND a.site_id IN ({placeholders})
+                """,
+            )
             for row in erows:
                 term = _norm_term(row["text"])
                 if _is_useful(term):
                     bump(term, "entity", row["label"], int(row["article_id"]), row["title"] or "", 1.4)
 
-            # YAKE analyses
-            if site_id:
-                yrows = await conn.fetch(
-                    """
-                    SELECT aa.result, a.id AS article_id, a.title
-                    FROM article_analyses aa
-                    JOIN articles a ON a.id = aa.article_id
-                    WHERE aa.tool_name = 'keywords_yake'
-                      AND aa.status = 'ok'
-                      AND a.site_id = $1
-                      AND COALESCE(a.fetched_at, a.published_at) >= $2
-                    """,
-                    site_id,
-                    since,
-                )
-            else:
-                yrows = await conn.fetch(
-                    """
-                    SELECT aa.result, a.id AS article_id, a.title
-                    FROM article_analyses aa
-                    JOIN articles a ON a.id = aa.article_id
-                    WHERE aa.tool_name = 'keywords_yake'
-                      AND aa.status = 'ok'
-                      AND COALESCE(a.fetched_at, a.published_at) >= $1
-                    """,
-                    since,
-                )
+            yrows = await _fetch(
+                conn,
+                """
+                SELECT aa.result, a.id AS article_id, a.title
+                FROM article_analyses aa
+                JOIN articles a ON a.id = aa.article_id
+                WHERE aa.tool_name = 'keywords_yake'
+                  AND aa.status = 'ok'
+                  AND COALESCE(a.fetched_at, a.published_at) >= $1
+                """,
+                """
+                SELECT aa.result, a.id AS article_id, a.title
+                FROM article_analyses aa
+                JOIN articles a ON a.id = aa.article_id
+                WHERE aa.tool_name = 'keywords_yake'
+                  AND aa.status = 'ok'
+                  AND COALESCE(a.fetched_at, a.published_at) >= $1
+                  AND a.site_id IN ({placeholders})
+                """,
+            )
             for row in yrows:
                 result = row["result"]
                 if isinstance(result, str):
@@ -239,7 +233,7 @@ class TrendsService:
                     "score": score,
                     "article_count": count,
                     "window_days": window_days,
-                    "site_id": site_id,
+                    "site_id": site_id if site_ids is None else None,
                     "sample_titles": item["titles"],
                 }
             )
@@ -252,11 +246,26 @@ class TrendsService:
         *,
         window_days: int = 7,
         site_id: Optional[int] = None,
+        site_ids: Optional[List[int]] = None,
         limit: int = 50,
     ) -> Dict[str, Any]:
         await self.ensure_table()
-        trends = await self.compute(window_days=window_days, site_id=site_id, limit=limit)
+        trends = await self.compute(
+            window_days=window_days, site_id=site_id, site_ids=site_ids, limit=limit
+        )
         now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        # Filtre collection : calcul live, ne pas ecraser le cache global
+        if site_ids is not None:
+            return {
+                "window_days": window_days,
+                "site_id": None,
+                "site_ids": [int(x) for x in site_ids if x is not None],
+                "count": len(trends),
+                "computed_at": now.isoformat(),
+                "trends": trends,
+                "persisted": False,
+            }
 
         async with self.db.pool.acquire() as conn:
             if site_id is None:
@@ -296,6 +305,7 @@ class TrendsService:
             "count": len(trends),
             "computed_at": now.isoformat(),
             "trends": trends,
+            "persisted": True,
         }
 
     async def list_stored(

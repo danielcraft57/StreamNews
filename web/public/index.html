@@ -2345,6 +2345,27 @@
                 gap: 8px;
             }
 
+            .app-shell.mockup .radar-score-parts{
+                margin: 14px 0;
+                padding: 12px 0;
+                border-top: 1px solid var(--line);
+            }
+
+            .app-shell.mockup .radar-score-row{
+                display: grid;
+                grid-template-columns: 88px 1fr 40px;
+                gap: 8px;
+                align-items: center;
+                margin: 6px 0;
+                font-size: 0.85rem;
+                color: var(--ink-soft);
+            }
+
+            .app-shell.mockup .radar-score-row strong{
+                text-align: right;
+                color: var(--ink);
+            }
+
             .app-shell.mockup .radar-pack{
                 margin-top: 18px;
                 padding-top: 14px;
@@ -3443,6 +3464,9 @@
                             <md-icon slot="icon">refresh</md-icon>
                             Recalculer
                         </md-outlined-button>
+                        <md-text-button type="button" id="trendsClearCollection" hidden>
+                            Toutes les sources
+                        </md-text-button>
                     </div>
                 </header>
                 <div class="jobs-layout trends-layout">
@@ -3740,6 +3764,6 @@
         </div>
     </div>
 
-    <script type="module" src="/js/main.js?v=20260723daily1"></script>
+    <script type="module" src="/js/main.js?v=20260723abc1"></script>
 </body>
 </html>

@@ -706,3 +706,31 @@ def cleanup_old_analyses(days: int = 30):
         return {"status": "success", "deleted_sites": deleted, "days": days}
     except Exception as exc:
         return {"status": "error", "error": str(exc)}
+
+
+@celery_app.task(name="streamnews.refresh_daily_brief")
+def refresh_daily_brief_task():
+    """Cron beat : regenerer le brief quotidien (06:00 UTC)."""
+    async def _job():
+        async def _work(db: Database):
+            from services.brief_service import BriefService
+
+            return await BriefService(db).refresh_daily()
+
+        return await _with_db(_work)
+
+    try:
+        payload = _run(_job())
+        logger.info(
+            "daily brief refreshed day=%s topics=%s",
+            payload.get("day"),
+            len(payload.get("topics") or []),
+        )
+        return {
+            "status": "success",
+            "day": payload.get("day"),
+            "topics": len(payload.get("topics") or []),
+        }
+    except Exception as exc:
+        logger.exception("daily brief failed: %s", exc)
+        return {"status": "error", "error": str(exc)}

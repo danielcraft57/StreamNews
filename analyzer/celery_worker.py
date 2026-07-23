@@ -24,6 +24,7 @@ from tasks import (  # noqa: E402
     enrich_site_articles_task,
     ingest_feed_task,
     finalize_analysis_task,
+    refresh_daily_brief_task,
 )
 
 __all__ = [
@@ -37,6 +38,7 @@ __all__ = [
     "enrich_site_articles_task",
     "ingest_feed_task",
     "finalize_analysis_task",
+    "refresh_daily_brief_task",
 ]
 
 if __name__ == "__main__":

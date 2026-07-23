@@ -234,6 +234,7 @@ async def get_trends(
     kind: str = "all",
     limit: int = 40,
     refresh: bool = False,
+    collection_id: int | None = None,
 ):
     """Tendances calculees (mots-cles, entites, YAKE) stockees en BDD."""
     try:
@@ -241,30 +242,32 @@ async def get_trends(
 
         svc = TrendsService(db)
         days = max(1, min(days, 365))
-        if refresh:
-            data = await svc.refresh(window_days=days, site_id=site_id, limit=limit)
-            if kind and kind != "all":
-                data["trends"] = [t for t in data["trends"] if t.get("kind") == kind]
-                data["count"] = len(data["trends"])
-                data["kind"] = kind
-            else:
-                data["kind"] = "all"
-            return data
+        site_ids = None
+        if collection_id:
+            from services.collections_service import CollectionsService
 
-        data = await svc.list_stored(
-            window_days=days, site_id=site_id, kind=kind, limit=limit
-        )
-        if not data["trends"]:
-            refreshed = await svc.refresh(window_days=days, site_id=site_id, limit=limit)
-            if kind and kind != "all":
-                refreshed["trends"] = [
-                    t for t in refreshed["trends"] if t.get("kind") == kind
-                ]
-                refreshed["count"] = len(refreshed["trends"])
-                refreshed["kind"] = kind
-            else:
-                refreshed["kind"] = "all"
-            return refreshed
+            site_ids = await CollectionsService(db).get_site_ids(collection_id)
+
+        if refresh or site_ids is not None:
+            data = await svc.refresh(
+                window_days=days, site_id=site_id, site_ids=site_ids, limit=limit
+            )
+        else:
+            data = await svc.list_stored(
+                window_days=days, site_id=site_id, kind=kind, limit=limit
+            )
+            if not data["trends"]:
+                data = await svc.refresh(
+                    window_days=days, site_id=site_id, site_ids=site_ids, limit=limit
+                )
+
+        if kind and kind != "all":
+            data["trends"] = [t for t in data["trends"] if t.get("kind") == kind]
+            data["count"] = len(data["trends"])
+            data["kind"] = kind
+        else:
+            data["kind"] = "all"
+        data["collection_id"] = collection_id
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -275,13 +278,22 @@ async def refresh_trends(
     days: int = 30,
     site_id: int | None = None,
     limit: int = 50,
+    collection_id: int | None = None,
 ):
     """Recalcule et persiste les tendances."""
     try:
         from services.trends_service import TrendsService
 
-        svc = TrendsService(db)
-        return await svc.refresh(window_days=days, site_id=site_id, limit=limit)
+        site_ids = None
+        if collection_id:
+            from services.collections_service import CollectionsService
+
+            site_ids = await CollectionsService(db).get_site_ids(collection_id)
+        data = await TrendsService(db).refresh(
+            window_days=days, site_id=site_id, site_ids=site_ids, limit=limit
+        )
+        data["collection_id"] = collection_id
+        return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

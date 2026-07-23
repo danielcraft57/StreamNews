@@ -9,7 +9,9 @@ const INTENT_LABEL = {
     need_tool: 'Besoin outil',
     build_in_public: 'Build in public',
     launch: 'Lancement',
+    ask_hn: 'Ask HN',
     pricing_pain: 'Pricing',
+    self_host_pain: 'Self-host',
 };
 
 const THEME_LABEL = {
@@ -25,30 +27,57 @@ const THEME_LABEL = {
     general: 'General',
 };
 
+/** Prefere des feeds RSS directs quand on les connait (moins de crawl homepage). */
 export const RECOMMENDED_SOURCES = [
-    { id: 'hn', label: 'Hacker News', hint: 'Ask HN / Show HN', url: 'https://news.ycombinator.com/' },
-    { id: 'indiehackers', label: 'Indie Hackers', hint: 'Founders & MRR', url: 'https://www.indiehackers.com/' },
-    { id: 'ph', label: 'Product Hunt', hint: 'Launches produit', url: 'https://www.producthunt.com/' },
-    { id: 'devto', label: 'DEV Community', hint: 'Devtools & side projects', url: 'https://dev.to/' },
-    { id: 'betalist', label: 'BetaList', hint: 'Startups early', url: 'https://betalist.com/' },
-    { id: 'tldr', label: 'TLDR', hint: 'Newsletter tech', url: 'https://tldr.tech/' },
-    { id: 'changelog-gh', label: 'GitHub Blog', hint: 'Outils & plateforme', url: 'https://github.blog/' },
-    { id: 'stripe', label: 'Stripe Blog', hint: 'Billing & SaaS', url: 'https://stripe.com/blog' },
-    { id: 'vercel', label: 'Vercel Blog', hint: 'Devtools / DX', url: 'https://vercel.com/blog' },
-    { id: 'supabase', label: 'Supabase Blog', hint: 'Backend / open-source', url: 'https://supabase.com/blog' },
-    { id: 'cloudflare', label: 'Cloudflare Blog', hint: 'Infra & edge', url: 'https://blog.cloudflare.com/' },
+    { id: 'hn', label: 'Hacker News', hint: 'RSS frontpage', url: 'https://hnrss.org/frontpage' },
+    { id: 'hn-ask', label: 'HN Ask', hint: 'Ask HN', url: 'https://hnrss.org/ask' },
+    { id: 'hn-show', label: 'HN Show', hint: 'Show HN', url: 'https://hnrss.org/show' },
+    { id: 'indiehackers', label: 'Indie Hackers', hint: 'Feed posts', url: 'https://www.indiehackers.com/feed.xml' },
+    { id: 'ph', label: 'Product Hunt', hint: 'Feed launches', url: 'https://www.producthunt.com/feed' },
+    { id: 'devto', label: 'DEV Community', hint: 'RSS global', url: 'https://dev.to/feed' },
+    { id: 'betalist', label: 'BetaList', hint: 'Startups early', url: 'https://betalist.com/feed.rss' },
+    { id: 'changelog-gh', label: 'GitHub Blog', hint: 'RSS', url: 'https://github.blog/feed/' },
+    { id: 'stripe', label: 'Stripe Blog', hint: 'Billing / SaaS', url: 'https://stripe.com/blog/feed.rss' },
+    { id: 'vercel', label: 'Vercel Blog', hint: 'Atom DX', url: 'https://vercel.com/atom' },
+    { id: 'supabase', label: 'Supabase Blog', hint: 'RSS', url: 'https://supabase.com/rss.xml' },
+    { id: 'cloudflare', label: 'Cloudflare Blog', hint: 'RSS', url: 'https://blog.cloudflare.com/rss/' },
 ];
 
 export const COMPETITOR_SOURCES = RECOMMENDED_SOURCES.filter((s) =>
     ['stripe', 'vercel', 'supabase', 'cloudflare', 'changelog-gh'].includes(s.id)
 );
 
+function scorePartBars(br = {}) {
+    const intent = Number(br.intent) || 0;
+    const frequency = Number(br.frequency) || 0;
+    const novelty = Number(br.novelty) || 0;
+    const max = Math.max(intent, frequency, novelty, 1);
+    const rows = [
+        { key: 'Intent', val: intent },
+        { key: 'Frequence', val: frequency },
+        { key: 'Nouveaute', val: novelty },
+    ];
+    return `
+        <div class="radar-score-parts" data-testid="radar-score-parts">
+            <h4>Decomposition du score</h4>
+            ${rows.map((r) => {
+                const pct = Math.max(4, Math.round((r.val / max) * 100));
+                return `
+                <div class="radar-score-row">
+                    <span>${escapeHtml(r.key)}</span>
+                    <div class="trend-bar" aria-hidden="true"><span style="width:${pct}%"></span></div>
+                    <strong>${r.val}</strong>
+                </div>`;
+            }).join('')}
+        </div>`;
+}
+
 export function renderRecommendedSources(sources = RECOMMENDED_SOURCES) {
     if (!sources?.length) return '';
     return `
         <div class="radar-pack" data-testid="radar-pack">
             <h4>Sources recommandees</h4>
-            <p class="pane-sub">Ajoute-les pour nourrir le radar (meme flux que Sources).</p>
+            <p class="pane-sub">Feeds RSS directs quand possible (pack sequentiel).</p>
             <md-filled-button type="button" data-radar-pack-all="1" style="width:100%;margin:8px 0 12px">
                 Ajouter tout le pack
             </md-filled-button>
@@ -120,6 +149,7 @@ export function renderRadarDetail(idea) {
             <div><dt>Articles</dt><dd>${idea.article_count || 0}</dd></div>
             <div><dt>Fenetre</dt><dd>${idea.window_days || '?'} j</dd></div>
         </dl>
+        ${scorePartBars(br)}
         ${intents.length ? `
             <div class="radar-intents">
                 <h4>Signaux</h4>

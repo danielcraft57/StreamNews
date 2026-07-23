@@ -28,6 +28,7 @@ export class StreamNewsApp {
         this._trends = [];
         this.trendsDays = 30;
         this.trendsKind = 'all';
+        this.trendsCollectionId = null;
         this._selectedTrendTerm = null;
         this._radarIdeas = [];
         this.radarDays = 30;
@@ -385,6 +386,7 @@ export class StreamNewsApp {
             this.showView('jobs');
         });
         document.querySelector('[data-nav="tendances"]')?.addEventListener('click', () => {
+            this.trendsCollectionId = null;
             this.showView('tendances');
         });
         document.querySelector('[data-nav="radar"]')?.addEventListener('click', () => {
@@ -795,6 +797,10 @@ export class StreamNewsApp {
         document.getElementById('trendsRefresh')?.addEventListener('click', () => {
             this.loadTrends({ refresh: true });
         });
+        document.getElementById('trendsClearCollection')?.addEventListener('click', () => {
+            this.trendsCollectionId = null;
+            this.loadTrends({ refresh: false });
+        });
         document.getElementById('trendsList')?.addEventListener('click', (e) => {
             const row = e.target.closest('[data-trend-term]');
             if (!row) return;
@@ -821,6 +827,8 @@ export class StreamNewsApp {
     async loadTrends({ refresh = false } = {}) {
         const list = document.getElementById('trendsList');
         if (list) list.innerHTML = '<p class="feed-empty">Calcul des tendances...</p>';
+        const clearBtn = document.getElementById('trendsClearCollection');
+        if (clearBtn) clearBtn.hidden = !this.trendsCollectionId;
         try {
             const data = window.SN?.api
                 ? await window.SN.api.getTrends({
@@ -828,6 +836,7 @@ export class StreamNewsApp {
                     kind: 'all',
                     limit: 50,
                     refresh,
+                    collectionId: this.trendsCollectionId,
                 })
                 : await (async () => {
                     const params = new URLSearchParams({
@@ -836,6 +845,9 @@ export class StreamNewsApp {
                         kind: 'all',
                     });
                     if (refresh) params.set('refresh', '1');
+                    if (this.trendsCollectionId) {
+                        params.set('collection_id', String(this.trendsCollectionId));
+                    }
                     const res = await fetch(`/api/trends?${params}`);
                     return res.json();
                 })();
@@ -845,7 +857,8 @@ export class StreamNewsApp {
                 const when = data.computed_at
                     ? `Maj ${new Date(data.computed_at).toLocaleString('fr-FR')}`
                     : 'Calculees depuis mots-cles / NLP';
-                sub.textContent = `${data.count || this._trends.length} sujets · ${this.trendsDays} j · ${when}`;
+                const col = this.trendsCollectionId ? ' · collection' : '';
+                sub.textContent = `${data.count || this._trends.length} sujets · ${this.trendsDays} j${col} · ${when}`;
             }
             if (!this._selectedTrendTerm && this._trends.length) {
                 this._selectedTrendTerm = this._trends[0].term;
@@ -1301,6 +1314,12 @@ export class StreamNewsApp {
             if (openRadar) {
                 this.radarCollectionId = Number(openRadar.dataset.collectionOpenRadar) || null;
                 this.showView('radar');
+                return;
+            }
+            const openTrends = e.target.closest('[data-collection-open-trends]');
+            if (openTrends) {
+                this.trendsCollectionId = Number(openTrends.dataset.collectionOpenTrends) || null;
+                this.showView('tendances');
                 return;
             }
             const remove = e.target.closest('[data-collection-remove-site]');
