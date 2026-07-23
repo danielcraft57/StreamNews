@@ -72,15 +72,16 @@ class BriefService:
         from services.idea_radar_service import IdeaRadarService
         from services.trends_service import TrendsService
 
-        trends_data = await TrendsService(self.db).refresh(
+        # compute() seulement : ne pas ecraser les caches globaux trends/radar (prod Postgres)
+        trends_list = await TrendsService(self.db).compute(
             window_days=window_days, limit=trends_limit
         )
-        radar_data = await IdeaRadarService(self.db).refresh(
+        radar_list = await IdeaRadarService(self.db).compute(
             window_days=window_days, limit=radar_limit
         )
 
         topics: List[Dict[str, Any]] = []
-        for t in trends_data.get("trends") or []:
+        for t in trends_list or []:
             topics.append(
                 {
                     "kind": "trend",
@@ -91,7 +92,7 @@ class BriefService:
                     "sample_titles": (t.get("sample_titles") or [])[:3],
                 }
             )
-        for idea in radar_data.get("ideas") or []:
+        for idea in radar_list or []:
             topics.append(
                 {
                     "kind": "radar",
@@ -107,8 +108,8 @@ class BriefService:
         topics.sort(key=lambda x: (-float(x.get("score") or 0), -(x.get("article_count") or 0)))
         return {
             "topics": topics[:top_n],
-            "trends_count": len(trends_data.get("trends") or []),
-            "radar_count": len(radar_data.get("ideas") or []),
+            "trends_count": len(trends_list or []),
+            "radar_count": len(radar_list or []),
         }
 
     async def compute(self, *, week_start: Optional[str] = None) -> Dict[str, Any]:

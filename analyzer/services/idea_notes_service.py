@@ -159,12 +159,13 @@ class IdeaNotesService:
         refs = data.get("source_refs") or []
         status = str(data.get("status") or "draft")[:40]
         async with self.db.pool.acquire() as conn:
-            await conn.execute(
+            row = await conn.fetchrow(
                 """
                 INSERT INTO idea_notes (
                     title, theme, problem, evidence, mvp_plan, source_refs,
                     status, created_at, updated_at
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                RETURNING *
                 """,
                 title,
                 theme,
@@ -175,9 +176,6 @@ class IdeaNotesService:
                 status,
                 now,
                 now,
-            )
-            row = await conn.fetchrow(
-                "SELECT * FROM idea_notes ORDER BY id DESC LIMIT 1"
             )
         return self._row_to_dict(row)
 

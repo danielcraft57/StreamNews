@@ -368,39 +368,52 @@ class IdeaRadarService:
         )
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
+        # Filtre collection : calcul live, ne pas ecraser le cache global Postgres/SQLite
+        if site_ids is not None:
+            return {
+                "window_days": window_days,
+                "site_ids": [int(x) for x in site_ids if x is not None],
+                "count": len(ideas),
+                "computed_at": now.isoformat(),
+                "ideas": ideas,
+                "persisted": False,
+            }
+
         async with self.db.pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM radar_ideas WHERE window_days = $1",
-                window_days,
-            )
-            for idea in ideas:
+            async with conn.transaction():
                 await conn.execute(
-                    """
-                    INSERT INTO radar_ideas (
-                        theme, title, score, intent_count, article_count, window_days,
-                        sample_titles, sample_snippets, evidence_ids, intents,
-                        score_breakdown, computed_at
-                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-                    """,
-                    idea["theme"],
-                    idea["title"],
-                    float(idea["score"]),
-                    int(idea["intent_count"]),
-                    int(idea["article_count"]),
-                    int(window_days),
-                    json.dumps(idea.get("sample_titles") or [], ensure_ascii=False),
-                    json.dumps(idea.get("sample_snippets") or [], ensure_ascii=False),
-                    json.dumps(idea.get("evidence_ids") or [], ensure_ascii=False),
-                    json.dumps(idea.get("intents") or [], ensure_ascii=False),
-                    json.dumps(idea.get("score_breakdown") or {}, ensure_ascii=False),
-                    now,
+                    "DELETE FROM radar_ideas WHERE window_days = $1",
+                    window_days,
                 )
+                for idea in ideas:
+                    await conn.execute(
+                        """
+                        INSERT INTO radar_ideas (
+                            theme, title, score, intent_count, article_count, window_days,
+                            sample_titles, sample_snippets, evidence_ids, intents,
+                            score_breakdown, computed_at
+                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                        """,
+                        idea["theme"],
+                        idea["title"],
+                        float(idea["score"]),
+                        int(idea["intent_count"]),
+                        int(idea["article_count"]),
+                        int(window_days),
+                        json.dumps(idea.get("sample_titles") or [], ensure_ascii=False),
+                        json.dumps(idea.get("sample_snippets") or [], ensure_ascii=False),
+                        json.dumps(idea.get("evidence_ids") or [], ensure_ascii=False),
+                        json.dumps(idea.get("intents") or [], ensure_ascii=False),
+                        json.dumps(idea.get("score_breakdown") or {}, ensure_ascii=False),
+                        now,
+                    )
 
         return {
             "window_days": window_days,
             "count": len(ideas),
             "computed_at": now.isoformat(),
             "ideas": ideas,
+            "persisted": True,
         }
 
     async def list_stored(

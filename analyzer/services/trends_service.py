@@ -268,36 +268,37 @@ class TrendsService:
             }
 
         async with self.db.pool.acquire() as conn:
-            if site_id is None:
-                await conn.execute(
-                    "DELETE FROM trends WHERE window_days = $1 AND site_id IS NULL",
-                    window_days,
-                )
-            else:
-                await conn.execute(
-                    "DELETE FROM trends WHERE window_days = $1 AND site_id = $2",
-                    window_days,
-                    site_id,
-                )
-            for t in trends:
-                titles = json.dumps(t.get("sample_titles") or [], ensure_ascii=False)
-                await conn.execute(
-                    """
-                    INSERT INTO trends (
-                        term, kind, label, score, article_count, window_days,
-                        site_id, computed_at, sample_titles
-                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-                    """,
-                    t["term"],
-                    t["kind"],
-                    t.get("label"),
-                    float(t["score"]),
-                    int(t["article_count"]),
-                    int(window_days),
-                    site_id,
-                    now,
-                    titles,
-                )
+            async with conn.transaction():
+                if site_id is None:
+                    await conn.execute(
+                        "DELETE FROM trends WHERE window_days = $1 AND site_id IS NULL",
+                        window_days,
+                    )
+                else:
+                    await conn.execute(
+                        "DELETE FROM trends WHERE window_days = $1 AND site_id = $2",
+                        window_days,
+                        site_id,
+                    )
+                for t in trends:
+                    titles = json.dumps(t.get("sample_titles") or [], ensure_ascii=False)
+                    await conn.execute(
+                        """
+                        INSERT INTO trends (
+                            term, kind, label, score, article_count, window_days,
+                            site_id, computed_at, sample_titles
+                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                        """,
+                        t["term"],
+                        t["kind"],
+                        t.get("label"),
+                        float(t["score"]),
+                        int(t["article_count"]),
+                        int(window_days),
+                        site_id,
+                        now,
+                        titles,
+                    )
 
         return {
             "window_days": window_days,
