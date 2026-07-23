@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StreamNews — proto UX (maquette)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #0b1f33;
+      --ink-soft: #3a4f63;
+      --teal: #0d9488;
+      --teal-deep: #0f766e;
+      --amber: #d97706;
+      --surface: #f4f6f8;
+      --panel: #ffffff;
+      --line: #d5dde5;
+      --danger: #b42318;
+      --radius: 6px;
+      --sidebar: 220px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Source Sans 3", system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--surface);
+      min-height: 100vh;
+      display: flex;
+    }
+
+    button, input { font: inherit; }
+
+    .sidebar {
+      width: var(--sidebar);
+      background: var(--ink);
+      color: #e8eef4;
+      padding: 20px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+      flex-shrink: 0;
+    }
+
+    .brand {
+      font-family: Fraunces, Georgia, serif;
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      padding: 4px 8px;
+    }
+
+    .nav-group { display: flex; flex-direction: column; gap: 4px; }
+    .nav-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #8fa3b5;
+      padding: 0 8px 6px;
+    }
+    .nav-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      color: #c5d2de;
+      padding: 9px 10px;
+      border-radius: var(--radius);
+      cursor: pointer;
+    }
+    .nav-item:hover { background: rgba(255,255,255,0.06); color: #fff; }
+    .nav-item.active {
+      background: var(--teal);
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    .search-trigger {
+      flex: 1;
+      max-width: 420px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 8px 12px;
+      color: var(--ink-soft);
+      cursor: pointer;
+      text-align: left;
+    }
+    .search-trigger kbd {
+      margin-left: auto;
+      font-size: 0.75rem;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 1px 6px;
+      background: #fff;
+    }
+    .btn {
+      border: 0;
+      border-radius: var(--radius);
+      padding: 10px 16px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .btn-primary { background: var(--teal); color: #fff; }
+    .btn-primary:hover { background: var(--teal-deep); }
+    .btn-ghost {
+      background: transparent;
+      color: var(--ink-soft);
+      border: 1px solid var(--line);
+    }
+
+    .workspace {
+      flex: 1;
+      display: grid;
+      grid-template-columns: minmax(280px, 38%) 1fr;
+      min-height: 0;
+    }
+
+    .feed {
+      border-right: 1px solid var(--line);
+      overflow: auto;
+      background: var(--panel);
+    }
+    .feed-item {
+      width: 100%;
+      text-align: left;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: transparent;
+      padding: 14px 16px;
+      cursor: pointer;
+      display: grid;
+      gap: 6px;
+    }
+    .feed-item:hover { background: #f0f4f7; }
+    .feed-item.active {
+      background: #e6f5f3;
+      box-shadow: inset 3px 0 0 var(--teal);
+    }
+    .meta {
+      display: flex;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: var(--ink-soft);
+    }
+    .feed-item h3 {
+      font-size: 0.98rem;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip {
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: #fff7ed;
+      color: var(--amber);
+      border: 1px solid #fde68a;
+    }
+    .chip.teal {
+      background: #ecfdf8;
+      color: var(--teal-deep);
+      border-color: #99f6e4;
+    }
+
+    .reader {
+      overflow: auto;
+      padding: 28px 36px 48px;
+      background:
+        radial-gradient(ellipse at top right, rgba(13,148,136,0.06), transparent 45%),
+        var(--surface);
+    }
+    .reader-source {
+      font-size: 0.85rem;
+      color: var(--ink-soft);
+      margin-bottom: 8px;
+    }
+    .reader h1 {
+      font-family: Fraunces, Georgia, serif;
+      font-size: 2rem;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      max-width: 38rem;
+      margin-bottom: 16px;
+    }
+    .summary {
+      max-width: 38rem;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--teal);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 18px;
+    }
+    .summary strong {
+      display: block;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--teal-deep);
+      margin-bottom: 6px;
+    }
+    .body {
+      max-width: 38rem;
+      font-size: 1.05rem;
+      line-height: 1.65;
+      color: #1c2e3f;
+    }
+    .body p + p { margin-top: 1rem; }
+    .entities { margin: 16px 0 20px; }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(11, 31, 51, 0.45);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 12vh;
+      z-index: 20;
+    }
+    .overlay.open { display: flex; }
+    .palette {
+      width: min(560px, 92vw);
+      background: var(--panel);
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      overflow: hidden;
+    }
+    .palette input {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      padding: 16px 18px;
+      font-size: 1.05rem;
+      outline: none;
+    }
+    .palette-section {
+      padding: 10px 8px 6px;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--ink-soft);
+    }
+    .palette button.row {
+      width: 100%;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      padding: 10px 14px;
+      cursor: pointer;
+      border-radius: var(--radius);
+      color: var(--ink);
+    }
+    .palette button.row:hover,
+    .palette button.row:focus {
+      background: #e6f5f3;
+      outline: none;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--ink);
+      color: #fff;
+      padding: 14px 16px;
+      border-radius: var(--radius);
+      max-width: 320px;
+      display: none;
+      z-index: 30;
+      gap: 10px;
+    }
+    .toast.open { display: grid; }
+    .toast .next {
+      margin-top: 8px;
+      background: var(--teal);
+      color: #fff;
+      border: 0;
+      border-radius: var(--radius);
+      padding: 8px 12px;
+      font-weight: 600;
+      cursor: pointer;
+      justify-self: start;
+    }
+
+    @media (max-width: 860px) {
+      .sidebar { display: none; }
+      .workspace { grid-template-columns: 1fr; }
+      .reader { display: none; }
+      .workspace.show-reader .feed { display: none; }
+      .workspace.show-reader .reader { display: block; }
+    }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">StreamNews</div>
+    <div class="nav-group">
+      <div class="nav-label">Lire</div>
+      <button class="nav-item active" type="button">Feed</button>
+      <button class="nav-item" type="button">Favoris</button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">Analyser</div>
+      <button class="nav-item" type="button" id="navSources">Sources</button>
+      <button class="nav-item" type="button">Jobs</button>
+    </div>
+    <div class="nav-group" style="margin-top:auto">
+      <div class="nav-label">Compte</div>
+      <button class="nav-item" type="button">Reglages</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="search-trigger" type="button" id="openSearch">
+        Rechercher articles, sources, actions…
+        <kbd>Ctrl K</kbd>
+      </button>
+      <button class="btn btn-primary" type="button" id="addSource">Ajouter une source</button>
+    </header>
+
+    <div class="workspace" id="workspace">
+      <section class="feed" id="feed" aria-label="Articles"></section>
+      <article class="reader" id="reader" aria-label="Lecteur"></article>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-label="Recherche">
+    <div class="palette">
+      <input id="paletteInput" type="search" placeholder="Rechercher ou lancer une action…" autocomplete="off" />
+      <div class="palette-section">Recherches frequentes</div>
+      <button class="row" type="button">Le Monde</button>
+      <button class="row" type="button">mots-cles IA</button>
+      <div class="palette-section">Actions rapides</div>
+      <button class="row" type="button">Ajouter une source</button>
+      <button class="row" type="button">Relancer l'enrichissement</button>
+      <div class="palette-section">Contextuel</div>
+      <button class="row" type="button">Analyser les entites de cet article</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">
+    <div>
+      <strong>12 articles importes</strong><br />
+      Resumes et mots-cles prets. ~20 min de lecture manuelle en moins.
+    </div>
+    <button class="next" type="button" id="toastNext">Lire le premier article</button>
+  </div>
+
+  <script>
+    const articles = [
+      {
+        id: 1,
+        source: "Le Monde",
+        time: "Il y a 12 min",
+        title: "L'Europe durcit sa strategie sur les puces electroniques",
+        chips: ["semiconducteurs", "UE"],
+        summary: "Bruxelles pousse un plan d'investissement et de souverainete industrielle face a la dependance asiatique.",
+        body: [
+          "Les capitales europeennes cherchent a securiser l'approvisionnement en composants critiques.",
+          "Le texte prevu renforce les aides ciblees et les partenariats avec les fabricants existants.",
+          "Les analystes notent un risque de course aux subventions si la coordination reste faible."
+        ],
+        entities: ["Ursula von der Leyen", "Commission europeenne", "Taiwan"]
+      },
+      {
+        id: 2,
+        source: "AFP",
+        time: "Il y a 41 min",
+        title: "Greve des transports: negociations reprises a Paris",
+        chips: ["social", "transports"],
+        summary: "Syndicats et direction reprennent les discussions apres une nuit de blocages partiels.",
+        body: [
+          "Le trafic reste perturbe sur plusieurs lignes pendant la matinee.",
+          "Un protocole d'accord pourrait etre propose d'ici la fin de semaine."
+        ],
+        entities: ["RATP", "Paris", "CGT"]
+      },
+      {
+        id: 3,
+        source: "TechCrunch",
+        time: "Il y a 2 h",
+        title: "Les modeles locaux gagnent du terrain hors du cloud",
+        chips: ["IA", "edge"],
+        summary: "Plusieurs startups misent sur l'inference on-device pour reduire couts et latence.",
+        body: [
+          "L'approche separe clairement collecte des donnees et execution du modele.",
+          "Pour StreamNews, c'est le meme enjeu: analyser vite, sans friction inutile."
+        ],
+        entities: ["OpenAI", "Apple", "NVIDIA"]
+      }
+    ];
+
+    const feed = document.getElementById("feed");
+    const reader = document.getElementById("reader");
+    const workspace = document.getElementById("workspace");
+    let activeId = 1;
+
+    function renderFeed() {
+      feed.innerHTML = articles.map((a) => `
+        <button class="feed-item ${a.id === activeId ? "active" : ""}" data-id="${a.id}" type="button">
+          <div class="meta"><span>${a.source}</span><span>·</span><span>${a.time}</span></div>
+          <h3>${a.title}</h3>
+          <div class="chips">${a.chips.map((c, i) => `<span class="chip ${i === 0 ? "" : "teal"}">${c}</span>`).join("")}</div>
+        </button>
+      `).join("");
+    }
+
+    function renderReader(id) {
+      const a = articles.find((x) => x.id === id) || articles[0];
+      activeId = a.id;
+      reader.innerHTML = `
+        <div class="reader-source">${a.source} · ${a.time}</div>
+        <h1>${a.title}</h1>
+        <div class="summary">
+          <strong>Resume IA</strong>
+          ${a.summary}
+        </div>
+        <div class="chips entities">
+          ${a.entities.map((e) => `<span class="chip">${e}</span>`).join("")}
+        </div>
+        <div class="body">${a.body.map((p) => `<p>${p}</p>`).join("")}</div>
+      `;
+      renderFeed();
+      workspace.classList.add("show-reader");
+    }
+
+    feed.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-id]");
+      if (!btn) return;
+      renderReader(Number(btn.dataset.id));
+    });
+
+    const overlay = document.getElementById("overlay");
+    const openSearch = document.getElementById("openSearch");
+    const paletteInput = document.getElementById("paletteInput");
+
+    function toggleSearch(open) {
+      overlay.classList.toggle("open", open);
+      if (open) {
+        paletteInput.value = "";
+        paletteInput.focus();
+      }
+    }
+
+    openSearch.addEventListener("click", () => toggleSearch(true));
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) toggleSearch(false);
+    });
+    document.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        toggleSearch(!overlay.classList.contains("open"));
+      }
+      if (e.key === "Escape") toggleSearch(false);
+    });
+
+    const toast = document.getElementById("toast");
+    document.getElementById("addSource").addEventListener("click", () => {
+      toast.classList.add("open");
+    });
+    document.getElementById("navSources").addEventListener("click", () => {
+      toast.classList.add("open");
+    });
+    document.getElementById("toastNext").addEventListener("click", () => {
+      toast.classList.remove("open");
+      renderReader(1);
+    });
+
+    renderReader(1);
+  </script>
+</body>
+</html>

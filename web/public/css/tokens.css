@@ -1,0 +1,156 @@
+/* StreamNews design tokens — Material Design 3 mapping */
+:root {
+  /* Brand */
+  --sn-ink: #0b1f33;
+  --sn-ink-soft: #3a4f63;
+  --sn-teal: #0d9488;
+  --sn-teal-deep: #0f766e;
+  --sn-amber: #d97706;
+  --sn-surface: #f4f6f8;
+  --sn-panel: #ffffff;
+  --sn-line: #e2e8f0;
+  --sn-radius: 6px;
+  --sn-danger: #c2410c;
+
+  /* MD3 system → StreamNews */
+  --md-sys-color-primary: var(--sn-teal);
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #ccfbf1;
+  --md-sys-color-on-primary-container: var(--sn-teal-deep);
+  --md-sys-color-secondary: var(--sn-amber);
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #ffedd5;
+  --md-sys-color-on-secondary-container: #9a3412;
+  --md-sys-color-surface: var(--sn-panel);
+  --md-sys-color-on-surface: var(--sn-ink);
+  --md-sys-color-surface-container: var(--sn-surface);
+  --md-sys-color-surface-container-high: #eef2f5;
+  --md-sys-color-outline: var(--sn-line);
+  --md-sys-color-outline-variant: #cbd5e1;
+  --md-sys-color-error: var(--sn-danger);
+  --md-sys-color-on-error: #ffffff;
+
+  --md-ref-typeface-brand: "Source Sans 3", system-ui, sans-serif;
+  --md-ref-typeface-plain: "Source Sans 3", system-ui, sans-serif;
+
+  --md-filled-button-container-shape: var(--sn-radius);
+  --md-outlined-button-container-shape: var(--sn-radius);
+  --md-text-button-container-shape: var(--sn-radius);
+  --md-dialog-container-shape: 10px;
+  --md-outlined-text-field-container-shape: var(--sn-radius);
+}
+
+md-filled-button,
+md-outlined-button,
+md-text-button {
+  --md-filled-button-label-text-weight: 700;
+  --md-outlined-button-label-text-weight: 600;
+}
+
+md-dialog {
+  max-width: min(520px, calc(100vw - 32px));
+}
+
+md-linear-progress {
+  --md-linear-progress-track-height: 6px;
+  --md-linear-progress-active-indicator-height: 6px;
+  width: 100%;
+  margin: 12px 0;
+}
+
+.md-field-stack {
+  display: grid;
+  gap: 14px;
+  margin: 12px 0 18px;
+}
+
+.md-row-switch {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--sn-line);
+}
+
+.md-row-switch:last-child {
+  border-bottom: 0;
+}
+
+.md-row-switch .label {
+  font-weight: 600;
+  color: var(--sn-ink);
+}
+
+.md-row-switch .help {
+  margin: 4px 0 0;
+  font-size: 0.82rem;
+  color: var(--sn-ink-soft);
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+/* Material assist chips — StreamNews tones */
+.sn-chips,
+.reader-entities-row,
+.feed-item-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+md-assist-chip {
+  --md-assist-chip-container-shape: 6px;
+  --md-assist-chip-label-text-size: 0.78rem;
+  --md-assist-chip-label-text-weight: 600;
+}
+
+md-assist-chip.tone-amber {
+  --md-assist-chip-container-color: #fff7ed;
+  --md-assist-chip-label-text-color: #c2410c;
+  --md-assist-chip-outline-color: #fdba74;
+}
+
+md-assist-chip.tone-teal,
+md-assist-chip.tone-org {
+  --md-assist-chip-container-color: #ecfdf8;
+  --md-assist-chip-label-text-color: var(--sn-teal-deep);
+  --md-assist-chip-outline-color: #99f6e4;
+}
+
+md-assist-chip.tone-per {
+  --md-assist-chip-container-color: #fff7ed;
+  --md-assist-chip-label-text-color: #c2410c;
+  --md-assist-chip-outline-color: #fdba74;
+}
+
+md-assist-chip.tone-loc {
+  --md-assist-chip-container-color: #eff6ff;
+  --md-assist-chip-label-text-color: #1d4ed8;
+  --md-assist-chip-outline-color: #93c5fd;
+}
+
+.app-shell.mockup .reader-toolbar md-text-button {
+  --md-text-button-label-text-weight: 600;
+}
+
+.app-shell.mockup .reader-toolbar md-text-button.is-on {
+  --md-text-button-label-text-color: var(--sn-teal);
+  --md-text-button-icon-color: var(--sn-teal);
+}
+
+.app-shell.mockup .reader-actions {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--sn-line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.app-shell.mockup .reader-actions md-outlined-button {
+  --md-outlined-button-container-height: 32px;
+  --md-outlined-button-label-text-size: 0.8rem;
+}

@@ -231,6 +231,9 @@ async def _crawl_and_persist(site_id: int, url: str, max_pages: int, depth: int)
         status = result.status
         if await should_cancel():
             status = "cancelled"
+        # Pas de "completed" tant que l'import RSS n'a pas fini (sinon UI aha trop tot).
+        if status == "completed" and feeds:
+            status = "ingesting"
         await db.update_site_status(
             site_id, status, feeds, result.total_pages_analyzed, merge_feeds=True
         )
@@ -424,12 +427,25 @@ def finalize_analysis_task(
     pages_analyzed: int,
     rss_count: int,
 ):
-    """Etape 3 (fan-in) : notifie l'UI."""
+    """Etape 3 (fan-in) : marque le site termine + notifie l'UI."""
     articles_count = sum(ingest_counts or [])
+    final_status = "completed" if status in (None, "", "ingesting", "analyzing", "completed") else status
+
+    async def _mark_done():
+        async def _work(db: Database):
+            await db.update_site_status(site_id, final_status, total_pages=pages_analyzed)
+
+        await _with_db(_work)
+
+    try:
+        _run(_mark_done())
+    except Exception as exc:
+        logger.warning("finalize mark status failed site_id=%s: %s", site_id, exc)
+
     summary = PipelineSummary(
         site_id=site_id,
         url=url,
-        status=status,
+        status=final_status,
         rss_count=rss_count,
         articles_count=articles_count,
         pages_analyzed=pages_analyzed,
@@ -442,7 +458,7 @@ def finalize_analysis_task(
             "rss_count": rss_count,
             "articles_count": articles_count,
             "total_pages": pages_analyzed,
-            "status": status,
+            "status": final_status,
         }
     )
     return summary.model_dump()
@@ -690,3 +706,90 @@ def cleanup_old_analyses(days: int = 30):
         return {"status": "success", "deleted_sites": deleted, "days": days}
     except Exception as exc:
         return {"status": "error", "error": str(exc)}
+
+
+@celery_app.task(name="streamnews.refresh_daily_brief")
+def refresh_daily_brief_task():
+    """Cron beat : regenerer le brief quotidien (06:00 UTC)."""
+    async def _job():
+        async def _work(db: Database):
+            from services.brief_service import BriefService
+
+            return await BriefService(db).refresh_daily()
+
+        return await _with_db(_work)
+
+    try:
+        payload = _run(_job())
+        logger.info(
+            "daily brief refreshed day=%s topics=%s",
+            payload.get("day"),
+            len(payload.get("topics") or []),
+        )
+        return {
+            "status": "success",
+            "day": payload.get("day"),
+            "topics": len(payload.get("topics") or []),
+        }
+    except Exception as exc:
+        logger.exception("daily brief failed: %s", exc)
+        return {"status": "error", "error": str(exc)}
+
+
+def _feed_urls_from_site(site: dict) -> List[str]:
+    urls: List[str] = []
+    seen = set()
+    for feed in site.get("rss_feeds") or []:
+        raw = feed.get("url") if isinstance(feed, dict) else feed
+        url = (str(raw or "")).strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        urls.append(url)
+    return urls
+
+
+@celery_app.task(name="streamnews.refresh_all_feeds")
+def refresh_all_feeds_task():
+    """Cron beat : reparse tous les flux RSS connus (quasi temps reel)."""
+    skip_status = {"cancelled", "analyzing", "crawling", "running"}
+
+    async def _list_sites():
+        async def _work(db: Database):
+            return await db.get_all_sites()
+
+        return await _with_db(_work)
+
+    try:
+        sites = _run(_list_sites()) or []
+    except Exception as exc:
+        logger.exception("refresh_all_feeds list failed: %s", exc)
+        return {"status": "error", "error": str(exc)}
+
+    queued = 0
+    sites_with_feeds = 0
+    for site in sites:
+        status = (site.get("status") or "").lower()
+        if status in skip_status:
+            continue
+        site_id = site.get("id")
+        if not site_id:
+            continue
+        urls = _feed_urls_from_site(site)
+        if not urls:
+            continue
+        sites_with_feeds += 1
+        for url in urls:
+            ingest_feed_task.delay(int(site_id), url)
+            queued += 1
+
+    logger.info(
+        "refresh_all_feeds queued_feeds=%s sites=%s",
+        queued,
+        sites_with_feeds,
+    )
+    return {
+        "status": "success",
+        "queued_feeds": queued,
+        "sites": sites_with_feeds,
+    }

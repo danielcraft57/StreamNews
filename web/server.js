@@ -26,10 +26,10 @@ app.use(helmet({
         useDefaults: true,
         directives: {
             defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
             scriptSrc: ["'self'"],
             imgSrc: ["'self'", "data:", "http:", "https:"],
-            fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "data:"],
+            fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com", "data:"],
             connectSrc: ["'self'", "ws:", "wss:"],
             upgradeInsecureRequests: null,
         },
@@ -173,6 +173,231 @@ app.get('/api/sites/:id/articles', async (req, res) => {
     }
 });
 
+app.get('/api/articles/search', async (req, res) => {
+    try {
+        const response = await axios.get(`${ANALYZER_URL}/articles/search`, {
+            timeout: 20000,
+            params: {
+                q: req.query.q || '',
+                limit: req.query.limit || 40,
+                ...(req.query.site_id ? { site_id: req.query.site_id } : {}),
+            },
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur recherche articles:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors de la recherche',
+            details: error.message,
+        });
+    }
+});
+
+app.get('/api/trends', async (req, res) => {
+    try {
+        const response = await axios.get(`${ANALYZER_URL}/trends`, {
+            timeout: 60000,
+            params: {
+                days: req.query.days || 30,
+                limit: req.query.limit || 40,
+                kind: req.query.kind || 'all',
+                ...(req.query.site_id ? { site_id: req.query.site_id } : {}),
+                ...(req.query.collection_id ? { collection_id: req.query.collection_id } : {}),
+                ...(req.query.refresh ? { refresh: req.query.refresh } : {}),
+            },
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur tendances:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors du chargement des tendances',
+            details: error.message,
+        });
+    }
+});
+
+app.post('/api/trends/refresh', async (req, res) => {
+    try {
+        const response = await axios.post(`${ANALYZER_URL}/trends/refresh`, null, {
+            timeout: 90000,
+            params: {
+                days: req.query.days || req.body?.days || 30,
+                limit: req.query.limit || req.body?.limit || 50,
+                ...(req.query.site_id || req.body?.site_id
+                    ? { site_id: req.query.site_id || req.body.site_id }
+                    : {}),
+                ...(req.query.collection_id || req.body?.collection_id
+                    ? { collection_id: req.query.collection_id || req.body.collection_id }
+                    : {}),
+            },
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur refresh tendances:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors du calcul des tendances',
+            details: error.message,
+        });
+    }
+});
+
+app.get('/api/radar', async (req, res) => {
+    try {
+        const response = await axios.get(`${ANALYZER_URL}/radar`, {
+            timeout: 60000,
+            params: {
+                days: req.query.days || 30,
+                limit: req.query.limit || 40,
+                theme: req.query.theme || 'all',
+                ...(req.query.refresh ? { refresh: req.query.refresh } : {}),
+                ...(req.query.collection_id ? { collection_id: req.query.collection_id } : {}),
+            },
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur radar:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors du chargement du radar',
+            details: error.message,
+        });
+    }
+});
+
+app.post('/api/radar/refresh', async (req, res) => {
+    try {
+        const response = await axios.post(`${ANALYZER_URL}/radar/refresh`, null, {
+            timeout: 90000,
+            params: {
+                days: req.query.days || req.body?.days || 30,
+                limit: req.query.limit || req.body?.limit || 40,
+                ...(req.query.collection_id || req.body?.collection_id
+                    ? { collection_id: req.query.collection_id || req.body.collection_id }
+                    : {}),
+            },
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error('Erreur refresh radar:', error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: 'Erreur lors du calcul du radar',
+            details: error.message,
+        });
+    }
+});
+
+async function proxyAnalyzer(req, res, { method = 'get', path, timeout = 60000, params, data } = {}) {
+    try {
+        const response = await axios({
+            method,
+            url: `${ANALYZER_URL}${path}`,
+            timeout,
+            params,
+            data,
+        });
+        res.json(response.data);
+    } catch (error) {
+        logger.error(`Erreur proxy ${path}:`, error.message);
+        const status = error.response?.status || 500;
+        res.status(status).json({
+            error: error.response?.data?.detail || error.message,
+            details: error.message,
+        });
+    }
+}
+
+app.get('/api/watchlist/keywords', (req, res) =>
+    proxyAnalyzer(req, res, { path: '/watchlist/keywords' }));
+app.post('/api/watchlist/keywords', (req, res) =>
+    proxyAnalyzer(req, res, { method: 'post', path: '/watchlist/keywords', data: req.body }));
+app.delete('/api/watchlist/keywords/:id', (req, res) =>
+    proxyAnalyzer(req, res, { method: 'delete', path: `/watchlist/keywords/${req.params.id}` }));
+app.get('/api/watchlist/alerts', (req, res) =>
+    proxyAnalyzer(req, res, {
+        path: '/watchlist/alerts',
+        params: {
+            days: req.query.days || 7,
+            limit: req.query.limit || 40,
+            ...(req.query.refresh ? { refresh: req.query.refresh } : {}),
+        },
+    }));
+app.post('/api/watchlist/refresh', (req, res) =>
+    proxyAnalyzer(req, res, {
+        method: 'post',
+        path: '/watchlist/refresh',
+        timeout: 90000,
+        params: { days: req.query.days || req.body?.days || 7 },
+    }));
+
+app.get('/api/brief/weekly', (req, res) =>
+    proxyAnalyzer(req, res, {
+        path: '/brief/weekly',
+        timeout: 120000,
+        params: {
+            ...(req.query.week ? { week: req.query.week } : {}),
+            ...(req.query.refresh ? { refresh: req.query.refresh } : {}),
+        },
+    }));
+app.post('/api/brief/weekly/refresh', (req, res) =>
+    proxyAnalyzer(req, res, {
+        method: 'post',
+        path: '/brief/weekly/refresh',
+        timeout: 120000,
+        params: { ...(req.query.week || req.body?.week ? { week: req.query.week || req.body.week } : {}) },
+    }));
+app.get('/api/brief/daily', (req, res) =>
+    proxyAnalyzer(req, res, {
+        path: '/brief/daily',
+        timeout: 120000,
+        params: {
+            ...(req.query.day ? { day: req.query.day } : {}),
+            ...(req.query.refresh ? { refresh: req.query.refresh } : {}),
+            ...(req.query.auto != null ? { auto: req.query.auto } : {}),
+        },
+    }));
+app.post('/api/brief/daily/refresh', (req, res) =>
+    proxyAnalyzer(req, res, {
+        method: 'post',
+        path: '/brief/daily/refresh',
+        timeout: 120000,
+        params: { ...(req.query.day || req.body?.day ? { day: req.query.day || req.body.day } : {}) },
+    }));
+
+app.get('/api/collections', (req, res) =>
+    proxyAnalyzer(req, res, { path: '/collections' }));
+app.get('/api/collections/:id', (req, res) =>
+    proxyAnalyzer(req, res, { path: `/collections/${req.params.id}` }));
+app.post('/api/collections/:id/sites', (req, res) =>
+    proxyAnalyzer(req, res, {
+        method: 'post',
+        path: `/collections/${req.params.id}/sites`,
+        data: req.body,
+    }));
+app.delete('/api/collections/:id/sites/:siteId', (req, res) =>
+    proxyAnalyzer(req, res, {
+        method: 'delete',
+        path: `/collections/${req.params.id}/sites/${req.params.siteId}`,
+    }));
+
+app.get('/api/ideas', (req, res) =>
+    proxyAnalyzer(req, res, { path: '/ideas', params: { limit: req.query.limit || 50 } }));
+app.post('/api/ideas', (req, res) =>
+    proxyAnalyzer(req, res, { method: 'post', path: '/ideas', data: req.body }));
+app.post('/api/ideas/from-radar', (req, res) =>
+    proxyAnalyzer(req, res, { method: 'post', path: '/ideas/from-radar', data: req.body }));
+app.get('/api/ideas/:id/markdown', (req, res) =>
+    proxyAnalyzer(req, res, { path: `/ideas/${req.params.id}/markdown` }));
+app.get('/api/ideas/:id', (req, res) =>
+    proxyAnalyzer(req, res, { path: `/ideas/${req.params.id}` }));
+app.patch('/api/ideas/:id', (req, res) =>
+    proxyAnalyzer(req, res, { method: 'patch', path: `/ideas/${req.params.id}`, data: req.body }));
+app.delete('/api/ideas/:id', (req, res) =>
+    proxyAnalyzer(req, res, { method: 'delete', path: `/ideas/${req.params.id}` }));
+
 app.post('/api/sites/:id/ingest-articles', async (req, res) => {
     try {
         const response = await axios.post(
@@ -190,6 +415,9 @@ app.post('/api/sites/:id/ingest-articles', async (req, res) => {
         });
     }
 });
+
+app.post('/api/feeds/refresh-all', (req, res) =>
+    proxyAnalyzer(req, res, { method: 'post', path: '/feeds/refresh-all', timeout: 30000 }));
 
 app.get('/api/articles/:id', async (req, res) => {
     try {

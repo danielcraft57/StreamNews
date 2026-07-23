@@ -1,4 +1,11 @@
-class StreamNewsApp {
+/**
+ * Orchestrateur StreamNews (migration progressive).
+ * Couches propres : /js/{core,models,services,views,ui}
+ * Material Web charge via /js/main.js
+ */
+/* global SN */
+
+export class StreamNewsApp {
     constructor() {
         this.socket = null;
         this.currentAnalysis = null;
@@ -7,13 +14,56 @@ class StreamNewsApp {
         this.selectedArticleId = null;
         this.viewingSiteId = null;
         this._articlePollTimer = null;
+        this._feedArticles = [];
+        this._sitesCache = [];
+        this.currentView = 'feed';
+        this.feedMode = 'all'; // all | favorites
+        this._favStorageKey = 'streamnews.favorites';
+        this._readStorageKey = 'streamnews.read';
+        this._settingsKey = 'streamnews.settings';
+        this._sourceChipsExpanded = false;
+        this._jobLog = [];
+        this._selectedJobId = null;
+        this.jobsFilter = 'all';
+        this._trends = [];
+        this.trendsDays = 30;
+        this.trendsKind = 'all';
+        this.trendsCollectionId = null;
+        this._selectedTrendTerm = null;
+        this._radarIdeas = [];
+        this.radarDays = 30;
+        this.radarTheme = 'all';
+        this._selectedRadarTheme = null;
+        this.radarCollectionId = null;
+        this._watchAlerts = [];
+        this._watchKeywords = [];
+        this.watchDays = 14;
+        this._selectedWatchKeyword = null;
+        this._brief = null;
+        this.briefPeriod = 'daily';
+        this._collections = [];
+        this._selectedCollectionId = null;
+        this._ideas = [];
+        this._selectedIdeaId = null;
+        this._pendingVictorySiteId = null;
         this.init();
     }
 
     init() {
         this.setupEventListeners();
+        this.setupConsoleUX();
         this.setupImageFallbacks();
+        this.setupAddSourceModal();
+        this.setupSettings();
+        this.setupJobsPane();
+        this.setupTrendsPane();
+        this.setupRadarPane();
+        this.setupWatchlistPane();
+        this.setupBriefPane();
+        this.setupCollectionsPane();
+        this.setupIdeasPane();
         this.loadSites();
+        this.loadFeed();
         this.connectWebSocket();
     }
 
@@ -50,7 +100,7 @@ class StreamNewsApp {
 
         // Delegation : evite onclick= inline (bloque par CSP script-src-attr)
         const sitesList = document.getElementById('sitesList');
-        sitesList.addEventListener('click', (e) => {
+        sitesList.addEventListener('click', async (e) => {
             const deleteBtn = e.target.closest('[data-delete-site]');
             if (deleteBtn) {
                 e.preventDefault();
@@ -59,10 +109,1582 @@ class StreamNewsApp {
                 if (siteId) this.deleteSite(siteId);
                 return;
             }
-            const item = e.target.closest('.site-item[data-site-id]');
+
+            const ingestBtn = e.target.closest('[data-ingest-site]');
+            if (ingestBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const siteId = Number(ingestBtn.dataset.ingestSite);
+                if (!siteId) return;
+                ingestBtn.disabled = true;
+                const prev = ingestBtn.textContent;
+                ingestBtn.textContent = 'Import…';
+                try {
+                    const res = await fetch(`/api/sites/${siteId}/ingest-articles`, { method: 'POST' });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || 'Erreur import');
+                    this.updateStatus(`${data.articles_count || 0} articles traités`, 'success');
+                    await this.loadFeed({ keepSelection: true });
+                } catch (err) {
+                    this.updateStatus(`Erreur: ${err.message}`, 'error');
+                } finally {
+                    ingestBtn.disabled = false;
+                    ingestBtn.textContent = prev;
+                }
+                return;
+            }
+
+            const enrichBtn = e.target.closest('[data-enrich-site]');
+            if (enrichBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const siteId = Number(enrichBtn.dataset.enrichSite);
+                if (!siteId) return;
+                enrichBtn.disabled = true;
+                try {
+                    const res = await fetch(`/api/sites/${siteId}/enrich-articles?limit=50`, { method: 'POST' });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || 'Erreur enrichissement');
+                    const site = this._sitesCache.find((s) => Number(s.id) === siteId);
+                    this.pushJob({
+                        type: 'Enrich',
+                        title: this.shortSiteLabel(site) || `Source #${siteId}`,
+                        detail: data.message || 'Enrichissement en file',
+                        status: 'done',
+                        siteId,
+                    });
+                    this.updateStatus('Enrichissement en file', 'success');
+                } catch (err) {
+                    this.updateStatus(`Erreur: ${err.message}`, 'error');
+                } finally {
+                    enrichBtn.disabled = false;
+                }
+                return;
+            }
+
+            const analyzeBtn = e.target.closest('[data-analyze-site]');
+            if (analyzeBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const siteId = Number(analyzeBtn.dataset.analyzeSite);
+                if (!siteId) return;
+                analyzeBtn.disabled = true;
+                try {
+                    const res = await fetch(`/api/sites/${siteId}/analyze-articles?limit=50`, { method: 'POST' });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || 'Erreur analyse');
+                    const site = this._sitesCache.find((s) => Number(s.id) === siteId);
+                    this.pushJob({
+                        type: 'NLP',
+                        title: this.shortSiteLabel(site) || `Source #${siteId}`,
+                        detail: data.message || 'Analyse texte en file',
+                        status: 'done',
+                        siteId,
+                    });
+                    this.updateStatus('Analyse texte en file', 'success');
+                } catch (err) {
+                    this.updateStatus(`Erreur: ${err.message}`, 'error');
+                } finally {
+                    analyzeBtn.disabled = false;
+                }
+                return;
+            }
+
+            const openBtn = e.target.closest('[data-open-site]');
+            if (openBtn) {
+                e.preventDefault();
+                const siteId = Number(openBtn.dataset.openSite);
+                if (siteId) this.showSiteDetails(siteId);
+                return;
+            }
+        });
+
+        sitesList.addEventListener('keydown', (e) => {
+            const item = e.target.closest('[data-open-site]');
             if (!item) return;
-            const siteId = Number(item.dataset.siteId);
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                const siteId = Number(item.dataset.openSite);
+                if (siteId) this.showSiteDetails(siteId);
+            }
+        });
+    }
+
+    setupConsoleUX() {
+        const overlay = document.getElementById('searchOverlay');
+        const openBtn = document.getElementById('openSearch');
+        const input = document.getElementById('searchInput');
+        const results = document.getElementById('searchResults');
+        let searchTimer = null;
+        let searchSeq = 0;
+
+        const renderSearch = async () => {
+            if (!results) return;
+            const query = input?.value || '';
+            const sites = (this._sitesCache || []).map((s) => ({
+                id: s.id,
+                title: this.shortSiteLabel(s),
+                name: s.name,
+                url: s.url,
+            }));
+            const localArticles = (this._feedArticles || []).map((a) => ({
+                id: a.id,
+                title: a.title,
+                summary: a.summary,
+                author: a.author,
+                source: a._siteLabel || '',
+                site_id: a.site_id || a._siteId,
+                published_at: a.published_at,
+            }));
+
+            const q = query.trim();
+            if (q.length < 2) {
+                results.innerHTML = window.SN?.searchView?.renderSearchPalette
+                    ? window.SN.searchView.renderSearchPalette({ query, articles: [], sites })
+                    : '';
+                return;
+            }
+
+            const seq = ++searchSeq;
+            results.innerHTML = window.SN?.searchView?.renderSearchPalette
+                ? window.SN.searchView.renderSearchPalette({ query, articles: [], sites, searching: true })
+                : '';
+
+            const filterVal = document.getElementById('feedFilter')?.value || 'all';
+            const siteId = filterVal !== 'all' ? Number(filterVal) : null;
+            const found = window.SN?.searchService
+                ? await window.SN.searchService.searchArticles(q, {
+                    siteId,
+                    limit: 40,
+                    localArticles,
+                    api: window.SN.api,
+                })
+                : { articles: [], source: 'none' };
+
+            if (seq !== searchSeq) return;
+
+            const enriched = (found.articles || []).map((a) => {
+                const site = (this._sitesCache || []).find((s) => Number(s.id) === Number(a.site_id));
+                return {
+                    ...a,
+                    source: site ? this.shortSiteLabel(site) : (a.source || a._siteLabel || ''),
+                };
+            });
+
+            results.innerHTML = window.SN?.searchView?.renderSearchPalette
+                ? window.SN.searchView.renderSearchPalette({
+                    query,
+                    articles: enriched,
+                    sites,
+                    searchSource: found.source,
+                })
+                : '';
+        };
+
+        const toggleSearch = (open) => {
+            if (!overlay) return;
+            overlay.classList.toggle('open', open);
+            if (open && input) {
+                input.value = '';
+                renderSearch();
+                input.focus();
+            }
+        };
+
+        const runSearchAction = (action) => {
+            toggleSearch(false);
+            if (action === 'focus-url') this.openAddSourceModal();
+            else if (action === 'scroll-sites' || action === 'go-sources') this.showView('sources');
+            else if (action === 'go-feed') this.showView('feed');
+            else if (action === 'go-favoris') this.showView('favoris');
+            else if (action === 'go-jobs') this.showView('jobs');
+            else if (action === 'go-tendances') this.showView('tendances');
+            else if (action === 'go-radar') this.showView('radar');
+            else if (action === 'go-collections') this.showView('collections');
+            else if (action === 'go-watchlist') this.showView('watchlist');
+            else if (action === 'go-brief') this.showView('brief');
+            else if (action === 'go-ideas') this.showView('ideas');
+            else if (action === 'reload-site') {
+                this.showView('sources');
+                this.updateStatus('Recharge le flux depuis Sources', 'info');
+            }
+        };
+
+        if (openBtn) openBtn.addEventListener('click', () => toggleSearch(true));
+        if (overlay) {
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) toggleSearch(false);
+            });
+        }
+        input?.addEventListener('input', () => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => renderSearch(), 220);
+        });
+        results?.addEventListener('click', (e) => {
+            const actionBtn = e.target.closest('[data-search-action]');
+            if (actionBtn) {
+                runSearchAction(actionBtn.dataset.searchAction);
+                return;
+            }
+            const articleBtn = e.target.closest('[data-search-article]');
+            if (articleBtn) {
+                const id = Number(articleBtn.dataset.searchArticle);
+                toggleSearch(false);
+                this.showView('feed');
+                if (id) {
+                    const exists = (this._feedArticles || []).some((a) => Number(a.id) === id);
+                    if (exists) this.selectArticle(id);
+                    else {
+                        // article hors feed charge : ouvrir via API detail
+                        this.selectArticle(id);
+                    }
+                }
+                return;
+            }
+            const siteBtn = e.target.closest('[data-search-site]');
+            if (siteBtn) {
+                const id = Number(siteBtn.dataset.searchSite);
+                toggleSearch(false);
+                if (id) this.showSiteDetails(id);
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                toggleSearch(!overlay?.classList.contains('open'));
+            }
+            if (e.key === 'Escape') toggleSearch(false);
+            if (overlay?.classList.contains('open') && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter')) {
+                const hits = [...(results?.querySelectorAll('.search-hit') || [])];
+                if (!hits.length) return;
+                const idx = hits.findIndex((h) => h.classList.contains('is-active'));
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    (hits[idx] || hits[0])?.click();
+                    return;
+                }
+                e.preventDefault();
+                const next = e.key === 'ArrowDown'
+                    ? (idx + 1) % hits.length
+                    : (idx <= 0 ? hits.length - 1 : idx - 1);
+                hits.forEach((h, i) => h.classList.toggle('is-active', i === next));
+                hits[next]?.scrollIntoView({ block: 'nearest' });
+            }
+        });
+
+        document.querySelector('[data-nav="sources"]')?.addEventListener('click', () => {
+            this.showView('sources');
+        });
+        document.querySelector('[data-nav="feed"]')?.addEventListener('click', () => {
+            this.showView('feed');
+        });
+        document.querySelector('[data-nav="favoris"]')?.addEventListener('click', () => {
+            this.showView('favoris');
+        });
+        document.querySelector('[data-nav="jobs"]')?.addEventListener('click', () => {
+            this.showView('jobs');
+        });
+        document.querySelector('[data-nav="tendances"]')?.addEventListener('click', () => {
+            this.trendsCollectionId = null;
+            this.showView('tendances');
+        });
+        document.querySelector('[data-nav="radar"]')?.addEventListener('click', () => {
+            this.radarCollectionId = null;
+            this.showView('radar');
+        });
+        document.querySelector('[data-nav="collections"]')?.addEventListener('click', () => {
+            this.showView('collections');
+        });
+        document.querySelector('[data-nav="watchlist"]')?.addEventListener('click', () => {
+            this.showView('watchlist');
+        });
+        document.querySelector('[data-nav="brief"]')?.addEventListener('click', () => {
+            this.showView('brief');
+        });
+        document.querySelector('[data-nav="ideas"]')?.addEventListener('click', () => {
+            this.showView('ideas');
+        });
+        document.querySelector('[data-nav="settings"]')?.addEventListener('click', () => {
+            this.showView('settings');
+        });
+
+        document.getElementById('feedFilter')?.addEventListener('change', () => {
+            this.syncSourceChips();
+            this.loadFeed({ keepSelection: false });
+        });
+
+        document.getElementById('feedRefresh')?.addEventListener('click', async () => {
+            await this.loadSites();
+            await this.loadFeed({ keepSelection: true });
+            this.updateStatus('Feed actualise', 'success');
+        });
+
+        document.getElementById('feedSourceChips')?.addEventListener('click', (e) => {
+            const toggle = e.target.closest('[data-feed-sources-toggle]');
+            if (toggle) {
+                this._sourceChipsExpanded = toggle.dataset.feedSourcesToggle === 'expand';
+                this.syncSourceChips();
+                return;
+            }
+            const chip = e.target.closest('[data-feed-source]');
+            if (!chip) return;
+            const filter = document.getElementById('feedFilter');
+            if (filter) filter.value = chip.dataset.feedSource || 'all';
+            this.syncSourceChips();
+            if (this.currentView !== 'feed' && this.currentView !== 'favoris') {
+                this.showView('feed');
+            } else {
+                this.loadFeed({ keepSelection: false });
+            }
+        });
+
+        const feedList = document.getElementById('feedList');
+        feedList?.addEventListener('click', (e) => {
+            if (e.target.closest('#favorisEmptyGoFeed')) {
+                this.showView('feed');
+                return;
+            }
+            const row = e.target.closest('[data-article-id]');
+            if (!row) return;
+            const id = Number(row.dataset.articleId);
+            if (id) this.selectArticle(id);
+        });
+    }
+
+    showView(view) {
+        this.currentView = view;
+        const workspace = document.getElementById('workspace');
+        const feedPane = document.getElementById('feedPane');
+        const feedTopbar = document.getElementById('feedTopbar');
+        const readerPane = document.getElementById('readerPane');
+        const sourcesPane = document.getElementById('sourcesPane');
+        const jobsPane = document.getElementById('jobsPane');
+        const trendsPane = document.getElementById('trendsPane');
+        const radarPane = document.getElementById('radarPane');
+        const collectionsPane = document.getElementById('collectionsPane');
+        const watchlistPane = document.getElementById('watchlistPane');
+        const briefPane = document.getElementById('briefPane');
+        const ideasPane = document.getElementById('ideasPane');
+        const settingsPane = document.getElementById('settingsPane');
+
+        const isSources = view === 'sources';
+        const isJobs = view === 'jobs';
+        const isTendances = view === 'tendances';
+        const isRadar = view === 'radar';
+        const isCollections = view === 'collections';
+        const isWatchlist = view === 'watchlist';
+        const isBrief = view === 'brief';
+        const isIdeas = view === 'ideas';
+        const isSettings = view === 'settings';
+        const isFavoris = view === 'favoris';
+        const isFeedLike = view === 'feed' || isFavoris;
+
+        if (workspace) {
+            workspace.classList.toggle('view-sources', isSources);
+            workspace.classList.toggle('view-jobs', isJobs);
+            workspace.classList.toggle('view-tendances', isTendances);
+            workspace.classList.toggle('view-radar', isRadar);
+            workspace.classList.toggle('view-collections', isCollections);
+            workspace.classList.toggle('view-watchlist', isWatchlist);
+            workspace.classList.toggle('view-brief', isBrief);
+            workspace.classList.toggle('view-ideas', isIdeas);
+            workspace.classList.toggle('view-settings', isSettings);
+        }
+        if (feedTopbar) feedTopbar.hidden = !isFeedLike;
+        if (feedPane) feedPane.hidden = !isFeedLike;
+        if (readerPane) readerPane.hidden = !isFeedLike;
+        if (sourcesPane) sourcesPane.hidden = !isSources;
+        if (jobsPane) jobsPane.hidden = !isJobs;
+        if (trendsPane) trendsPane.hidden = !isTendances;
+        if (radarPane) radarPane.hidden = !isRadar;
+        if (collectionsPane) collectionsPane.hidden = !isCollections;
+        if (watchlistPane) watchlistPane.hidden = !isWatchlist;
+        if (briefPane) briefPane.hidden = !isBrief;
+        if (ideasPane) ideasPane.hidden = !isIdeas;
+        if (settingsPane) settingsPane.hidden = !isSettings;
+
+        document.querySelectorAll('.sidebar-nav-item[data-nav]').forEach((btn) => {
+            btn.classList.toggle('is-active', btn.dataset.nav === view);
+        });
+
+        if (isSources) {
+            this.loadSites();
+            return;
+        }
+        if (isJobs) {
+            this.syncJobsFromSites();
+            this.renderJobs();
+            return;
+        }
+        if (isTendances) {
+            this.loadTrends();
+            return;
+        }
+        if (isRadar) {
+            this.loadRadar();
+            return;
+        }
+        if (isCollections) {
+            this.loadCollections();
+            return;
+        }
+        if (isWatchlist) {
+            this.loadWatchlist();
+            return;
+        }
+        if (isBrief) {
+            this.loadBrief();
+            return;
+        }
+        if (isIdeas) {
+            this.loadIdeas();
+            return;
+        }
+        if (isSettings) {
+            this.hydrateSettingsForm();
+            return;
+        }
+
+        this.feedMode = isFavoris ? 'favorites' : 'all';
+        const sourceBar = document.getElementById('feedSourceBar');
+        if (sourceBar) sourceBar.hidden = isFavoris;
+        this.syncSourceChips();
+        this.renderFeedList({ keepSelection: true, autoSelect: true });
+    }
+
+    syncSourceChips() {
+        const host = document.getElementById('feedSourceChips');
+        if (!host || !window.SN?.feedChips?.renderSourceChips) return;
+        const active = document.getElementById('feedFilter')?.value || 'all';
+        host.innerHTML = window.SN.feedChips.renderSourceChips(this._sitesCache || [], active, {
+            expanded: !!this._sourceChipsExpanded,
+        });
+        host.querySelectorAll('.js-hide-on-error').forEach((img) => {
+            img.addEventListener('error', () => { img.style.display = 'none'; }, { once: true });
+        });
+    }
+
+    setupAddSourceModal() {
+        // Delegation : marche avec md-* et boutons crees dynamiquement
+        document.body.addEventListener('click', (e) => {
+            const openBtn = e.target.closest?.(
+                '#openAddSource, #openAddSourceFromFeed, #emptyAddSource, #feedEmptyAddSource, #favorisEmptyGoFeed'
+            );
+            if (openBtn) {
+                e.preventDefault();
+                if (openBtn.id === 'favorisEmptyGoFeed') {
+                    this.showView('feed');
+                    return;
+                }
+                this.openAddSourceModal();
+                return;
+            }
+            if (e.target.closest?.('#closeAddSource')) {
+                this.closeAddSourceModal();
+                return;
+            }
+            if (e.target?.id === 'addSourceModal') {
+                this.closeAddSourceModal({ force: !this.currentAnalysis });
+                return;
+            }
+            if (e.target.closest?.('#addSourceReadFirst')) {
+                const siteId = this._pendingVictorySiteId;
+                this.closeAddSourceModal({ force: true });
+                if (siteId) {
+                    const filter = document.getElementById('feedFilter');
+                    if (filter) filter.value = String(siteId);
+                }
+                this.showView('feed');
+                (async () => {
+                    if (siteId) await this.ensureSiteArticles(siteId);
+                    await this.loadFeed({ keepSelection: false });
+                })();
+            }
+        });
+        // md-filled-button type=submit : fallback si le submit natif ne part pas
+        document.getElementById('analyzeBtn')?.addEventListener('click', (e) => {
+            const form = document.getElementById('analyzeForm');
+            if (!form || form.hidden) return;
+            e.preventDefault();
+            form.requestSubmit?.() || form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') this.closeAddSourceModal({ force: !this.currentAnalysis });
+        });
+    }
+
+    async openAddSourceModal({ keepVictory = false, url = null } = {}) {
+        const modal = document.getElementById('addSourceModal');
+        if (modal) {
+            modal.hidden = false;
+            modal.classList.add('open');
+        }
+        const victory = document.getElementById('addSourceVictory');
+        const form = document.getElementById('analyzeForm');
+        const progress = document.getElementById('addSourceProgress');
+        const actions = document.getElementById('addSourceActions');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const urlField = document.getElementById('url');
+
+        if (keepVictory || (victory && !victory.hidden)) {
+            if (form) form.hidden = true;
+            if (progress) progress.hidden = true;
+            if (actions) actions.hidden = true;
+            if (victory) victory.hidden = false;
+        } else {
+            if (victory && !this.currentAnalysis) victory.hidden = true;
+            if (form && !this.currentAnalysis) form.hidden = false;
+            if (progress && !this.currentAnalysis) progress.hidden = true;
+            if (actions && !this.currentAnalysis) actions.hidden = false;
+            if (analyzeBtn && !this.currentAnalysis) {
+                analyzeBtn.disabled = false;
+                analyzeBtn.hidden = false;
+            }
+            if (url && urlField) {
+                urlField.value = url;
+                try { urlField.setAttribute('value', url); } catch (_) { /* md field */ }
+            }
+            setTimeout(() => urlField?.focus?.(), 40);
+        }
+    }
+
+    async closeAddSourceModal({ force = false } = {}) {
+        if (this.currentAnalysis && !force) {
+            this.updateStatus('Analyse en cours — tu peux laisser le dialog ouvert', 'info');
+            return;
+        }
+        const modal = document.getElementById('addSourceModal');
+        if (modal) {
+            modal.classList.remove('open');
+            modal.hidden = true;
+        }
+        if (!this.currentAnalysis) {
+            const form = document.getElementById('analyzeForm');
+            if (form) form.hidden = false;
+            const victory = document.getElementById('addSourceVictory');
+            if (victory) victory.hidden = true;
+            const actions = document.getElementById('addSourceActions');
+            if (actions) actions.hidden = false;
+            this.showLoading(false);
+        }
+    }
+
+    defaultSettings() {
+        return (window.SN?.defaultSettings?.() || {
+            autoMarkRead: false,
+            showSummaryFirst: true,
+            denseList: false,
+            autoEnrich: true,
+            celebrateFirst: true,
+            toasts: true,
+        });
+    }
+
+    loadSettings() {
+        if (window.SN?.storage) return window.SN.storage.loadSettings();
+        try {
+            const raw = JSON.parse(localStorage.getItem(this._settingsKey) || '{}');
+            return { ...this.defaultSettings(), ...(raw && typeof raw === 'object' ? raw : {}) };
+        } catch (_) {
+            return this.defaultSettings();
+        }
+    }
+
+    saveSettings(settings) {
+        if (window.SN?.storage) return window.SN.storage.saveSettings(settings);
+        localStorage.setItem(this._settingsKey, JSON.stringify(settings));
+        document.body.classList.toggle('dense-feed', Boolean(settings.denseList));
+        return settings;
+    }
+
+    hydrateSettingsForm() {
+        if (window.SN?.hydrateSettingsForm) {
+            window.SN.hydrateSettingsForm(this.loadSettings());
+            return;
+        }
+        const form = document.getElementById('settingsForm');
+        if (!form) return;
+        const s = this.loadSettings();
+        Object.entries(s).forEach(([key, val]) => {
+            const el = form.querySelector(`[data-setting="${key}"]`);
+            if (!el) return;
+            if (el.tagName === 'MD-SWITCH') el.selected = Boolean(val);
+            else if ('checked' in el) el.checked = Boolean(val);
+        });
+    }
+
+    setupSettings() {
+        this.saveSettings(this.loadSettings());
+        this.hydrateSettingsForm();
+        document.getElementById('settingsForm')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const next = this.defaultSettings();
+            form.querySelectorAll('[data-setting]').forEach((el) => {
+                const key = el.dataset.setting;
+                if (!key) return;
+                if (el.tagName === 'MD-SWITCH') next[key] = Boolean(el.selected);
+                else if ('checked' in el) next[key] = Boolean(el.checked);
+            });
+            this.saveSettings(next);
+            this.updateStatus('Reglages enregistres', 'success');
+        });
+        document.getElementById('clearLocalCache')?.addEventListener('click', () => {
+            if (!confirm('Vider favoris, articles lus et reglages locaux ?')) return;
+            if (window.SN?.storage) window.SN.storage.clearLocal();
+            else {
+                localStorage.removeItem(this._favStorageKey);
+                localStorage.removeItem(this._readStorageKey);
+                localStorage.removeItem(this._settingsKey);
+                this.saveSettings(this.defaultSettings());
+            }
+            this.hydrateSettingsForm();
+            this.renderFeedList({ keepSelection: true, autoSelect: false });
+            this.updateStatus('Cache local vide', 'success');
+        });
+    }
+
+    setupJobsPane() {
+        document.getElementById('jobsFilters')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-jobs-filter]');
+            if (!btn) return;
+            this.jobsFilter = btn.dataset.jobsFilter || 'all';
+            document.querySelectorAll('[data-jobs-filter]').forEach((el) => {
+                el.classList.toggle('is-active', el.dataset.jobsFilter === this.jobsFilter);
+            });
+            this.renderJobs();
+        });
+        document.getElementById('jobsList')?.addEventListener('click', (e) => {
+            const row = e.target.closest('[data-job-id]');
+            if (!row) return;
+            this._selectedJobId = row.dataset.jobId;
+            this.renderJobs();
+        });
+        document.getElementById('jobsRefresh')?.addEventListener('click', async () => {
+            await this.loadSites();
+            this.syncJobsFromSites();
+            this.renderJobs();
+            this.updateStatus('Jobs actualises', 'success');
+        });
+        document.getElementById('jobsDetail')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-open-job-site]');
+            if (!btn) return;
+            const siteId = Number(btn.dataset.openJobSite);
             if (siteId) this.showSiteDetails(siteId);
+        });
+    }
+
+    setupTrendsPane() {
+        document.getElementById('trendsWindow')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-trends-days]');
+            if (!btn) return;
+            this.trendsDays = Number(btn.dataset.trendsDays) || 30;
+            document.querySelectorAll('[data-trends-days]').forEach((el) => {
+                el.classList.toggle('is-active', Number(el.dataset.trendsDays) === this.trendsDays);
+            });
+            this.loadTrends({ refresh: false });
+        });
+        document.getElementById('trendsKind')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-trends-kind]');
+            if (!btn) return;
+            this.trendsKind = btn.dataset.trendsKind || 'all';
+            document.querySelectorAll('[data-trends-kind]').forEach((el) => {
+                el.classList.toggle('is-active', el.dataset.trendsKind === this.trendsKind);
+            });
+            this.renderTrends();
+        });
+        document.getElementById('trendsRefresh')?.addEventListener('click', () => {
+            this.loadTrends({ refresh: true });
+        });
+        document.getElementById('trendsClearCollection')?.addEventListener('click', () => {
+            this.trendsCollectionId = null;
+            this.loadTrends({ refresh: false });
+        });
+        document.getElementById('trendsList')?.addEventListener('click', (e) => {
+            const row = e.target.closest('[data-trend-term]');
+            if (!row) return;
+            this._selectedTrendTerm = row.dataset.trendTerm;
+            this.renderTrends();
+        });
+        document.getElementById('trendsDetail')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-trend-search]');
+            if (!btn) return;
+            const term = btn.dataset.trendSearch;
+            if (!term) return;
+            this.showView('feed');
+            const overlay = document.getElementById('searchOverlay');
+            const input = document.getElementById('searchInput');
+            if (overlay && input) {
+                overlay.classList.add('open');
+                input.value = term;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.focus();
+            }
+        });
+    }
+
+    async loadTrends({ refresh = false } = {}) {
+        const list = document.getElementById('trendsList');
+        if (list) list.innerHTML = '<p class="feed-empty">Calcul des tendances...</p>';
+        const clearBtn = document.getElementById('trendsClearCollection');
+        if (clearBtn) clearBtn.hidden = !this.trendsCollectionId;
+        try {
+            const data = window.SN?.api
+                ? await window.SN.api.getTrends({
+                    days: this.trendsDays,
+                    kind: 'all',
+                    limit: 50,
+                    refresh,
+                    collectionId: this.trendsCollectionId,
+                })
+                : await (async () => {
+                    const params = new URLSearchParams({
+                        days: String(this.trendsDays),
+                        limit: '50',
+                        kind: 'all',
+                    });
+                    if (refresh) params.set('refresh', '1');
+                    if (this.trendsCollectionId) {
+                        params.set('collection_id', String(this.trendsCollectionId));
+                    }
+                    const res = await fetch(`/api/trends?${params}`);
+                    return res.json();
+                })();
+            this._trends = Array.isArray(data.trends) ? data.trends : [];
+            const sub = document.getElementById('trendsSubtitle');
+            if (sub) {
+                const when = data.computed_at
+                    ? `Maj ${new Date(data.computed_at).toLocaleString('fr-FR')}`
+                    : 'Calculees depuis mots-cles / NLP';
+                const col = this.trendsCollectionId ? ' · collection' : '';
+                sub.textContent = `${data.count || this._trends.length} sujets · ${this.trendsDays} j${col} · ${when}`;
+            }
+            if (!this._selectedTrendTerm && this._trends.length) {
+                this._selectedTrendTerm = this._trends[0].term;
+            }
+            this.renderTrends();
+            if (refresh) this.updateStatus('Tendances mises a jour', 'success');
+        } catch (err) {
+            console.error(err);
+            if (list) {
+                list.innerHTML = `<p class="feed-empty">Impossible de charger les tendances (${this.escapeHtml(err.message || 'erreur')}).</p>`;
+            }
+            this.updateStatus('Erreur tendances', 'error');
+        }
+    }
+
+    renderTrends() {
+        const list = document.getElementById('trendsList');
+        const detail = document.getElementById('trendsDetail');
+        if (!list || !detail) return;
+        const tv = window.SN?.trendsView;
+        let trends = this._trends.slice();
+        if (this.trendsKind && this.trendsKind !== 'all') {
+            trends = trends.filter((t) => t.kind === this.trendsKind);
+        }
+        if (!trends.length) {
+            list.innerHTML = tv?.renderTrendsList
+                ? tv.renderTrendsList([])
+                : '<p class="feed-empty">Aucune tendance pour ce filtre.</p>';
+            detail.innerHTML = tv?.renderTrendsDetail
+                ? tv.renderTrendsDetail(null)
+                : '';
+            return;
+        }
+        if (!trends.some((t) => t.term === this._selectedTrendTerm)) {
+            this._selectedTrendTerm = trends[0].term;
+        }
+        const maxScore = Math.max(...trends.map((t) => Number(t.score) || 0), 1);
+        list.innerHTML = tv?.renderTrendsList
+            ? tv.renderTrendsList(trends, { selectedTerm: this._selectedTrendTerm, maxScore })
+            : '';
+        const selected = trends.find((t) => t.term === this._selectedTrendTerm) || trends[0];
+        detail.innerHTML = tv?.renderTrendsDetail
+            ? tv.renderTrendsDetail(selected)
+            : '';
+    }
+
+    setupRadarPane() {
+        document.getElementById('radarWindow')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-radar-days]');
+            if (!btn) return;
+            this.radarDays = Number(btn.dataset.radarDays) || 30;
+            document.querySelectorAll('[data-radar-days]').forEach((el) => {
+                el.classList.toggle('is-active', Number(el.dataset.radarDays) === this.radarDays);
+            });
+            this.loadRadar({ refresh: false });
+        });
+        document.getElementById('radarTheme')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-radar-theme-filter]');
+            if (!btn) return;
+            this.radarTheme = btn.dataset.radarThemeFilter || 'all';
+            document.querySelectorAll('[data-radar-theme-filter]').forEach((el) => {
+                el.classList.toggle('is-active', el.dataset.radarThemeFilter === this.radarTheme);
+            });
+            this.renderRadar();
+        });
+        document.getElementById('radarRefresh')?.addEventListener('click', () => {
+            this.loadRadar({ refresh: true });
+        });
+        document.getElementById('radarList')?.addEventListener('click', (e) => {
+            const row = e.target.closest('[data-radar-theme]');
+            if (!row) return;
+            this._selectedRadarTheme = row.dataset.radarTheme;
+            this.renderRadar();
+        });
+        document.getElementById('radarDetail')?.addEventListener('click', (e) => {
+            const packAll = e.target.closest('[data-radar-pack-all]');
+            if (packAll) {
+                this.addRadarPackAll();
+                return;
+            }
+            const packBtn = e.target.closest('[data-radar-source-url]');
+            if (packBtn) {
+                const url = packBtn.dataset.radarSourceUrl;
+                if (url) this.openAddSourceModal({ url });
+                return;
+            }
+            const createIdea = e.target.closest('[data-radar-create-idea]');
+            if (createIdea) {
+                this.createIdeaFromSelectedRadar();
+                return;
+            }
+            const searchBtn = e.target.closest('[data-radar-search]');
+            if (searchBtn) {
+                const term = searchBtn.dataset.radarSearch;
+                if (!term) return;
+                this.openFeedSearch(term);
+                return;
+            }
+            const artBtn = e.target.closest('[data-radar-article]');
+            if (artBtn) {
+                const id = Number(artBtn.dataset.radarArticle);
+                if (!id) return;
+                this.showView('feed');
+                this.selectArticle(id);
+            }
+        });
+    }
+
+    openFeedSearch(term) {
+        this.showView('feed');
+        const overlay = document.getElementById('searchOverlay');
+        const input = document.getElementById('searchInput');
+        if (overlay && input) {
+            overlay.classList.add('open');
+            input.value = term;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.focus();
+        }
+    }
+
+    async addRadarPackAll() {
+        const sources = window.SN?.radarView?.RECOMMENDED_SOURCES || [];
+        if (!sources.length || !window.SN?.api?.analyze) {
+            this.updateStatus('Pack indisponible', 'error');
+            return;
+        }
+        if (this._packRunning) {
+            this.updateStatus('Pack deja en cours…', 'info');
+            return;
+        }
+        this._packRunning = true;
+        let ok = 0;
+        try {
+            for (let i = 0; i < sources.length; i++) {
+                const s = sources[i];
+                this.updateStatus(`Pack ${i + 1}/${sources.length} · ${s.label}…`, 'info');
+                try {
+                    await window.SN.api.analyze({
+                        url: s.url,
+                        max_pages: 30,
+                        depth: 1,
+                    });
+                    ok += 1;
+                } catch (err) {
+                    console.warn('pack source', s.url, err);
+                }
+            }
+            await this.loadSites();
+            this.updateStatus(`Pack termine · ${ok}/${sources.length} lances`, 'success');
+        } finally {
+            this._packRunning = false;
+        }
+    }
+
+    async createIdeaFromSelectedRadar() {
+        const ideas = this._radarIdeas || [];
+        const selected = ideas.find((i) => i.theme === this._selectedRadarTheme) || ideas[0];
+        if (!selected || !window.SN?.api?.createIdeaFromRadar) {
+            this.updateStatus('Aucune idee a convertir', 'error');
+            return;
+        }
+        try {
+            const note = await window.SN.api.createIdeaFromRadar(selected);
+            this.updateStatus('Fiche creee', 'success');
+            this._selectedIdeaId = note?.id || null;
+            this.showView('ideas');
+        } catch (err) {
+            console.error(err);
+            this.updateStatus(err.message || 'Erreur fiche', 'error');
+        }
+    }
+
+    async loadRadar({ refresh = false } = {}) {
+        const list = document.getElementById('radarList');
+        if (list) list.innerHTML = '<p class="feed-empty">Scan du radar...</p>';
+        try {
+            const data = window.SN?.api
+                ? await window.SN.api.getRadar({
+                    days: this.radarDays,
+                    theme: 'all',
+                    limit: 40,
+                    refresh,
+                    collectionId: this.radarCollectionId,
+                })
+                : await (async () => {
+                    const params = new URLSearchParams({
+                        days: String(this.radarDays),
+                        limit: '40',
+                        theme: 'all',
+                    });
+                    if (refresh) params.set('refresh', '1');
+                    if (this.radarCollectionId) {
+                        params.set('collection_id', String(this.radarCollectionId));
+                    }
+                    const res = await fetch(`/api/radar?${params}`);
+                    return res.json();
+                })();
+            this._radarIdeas = Array.isArray(data.ideas) ? data.ideas : [];
+            const sub = document.getElementById('radarSubtitle');
+            if (sub) {
+                const when = data.computed_at
+                    ? `Maj ${new Date(data.computed_at).toLocaleString('fr-FR')}`
+                    : 'Intent + themes dans tes articles';
+                const col = this.radarCollectionId ? ' · collection' : '';
+                sub.textContent = `${data.count || this._radarIdeas.length} signaux · ${this.radarDays} j${col} · ${when}`;
+            }
+            if (!this._selectedRadarTheme && this._radarIdeas.length) {
+                this._selectedRadarTheme = this._radarIdeas[0].theme;
+            }
+            this.renderRadar();
+            if (refresh) this.updateStatus('Radar mis a jour', 'success');
+        } catch (err) {
+            console.error(err);
+            if (list) {
+                list.innerHTML = `<p class="feed-empty">Impossible de charger le radar (${this.escapeHtml(err.message || 'erreur')}).</p>`;
+            }
+            this.updateStatus('Erreur radar', 'error');
+        }
+    }
+
+    renderRadar() {
+        const list = document.getElementById('radarList');
+        const detail = document.getElementById('radarDetail');
+        if (!list || !detail) return;
+        const rv = window.SN?.radarView;
+        let ideas = this._radarIdeas.slice();
+        if (this.radarTheme && this.radarTheme !== 'all') {
+            ideas = ideas.filter((i) => i.theme === this.radarTheme);
+        }
+        const packHtml = rv?.renderRecommendedSources
+            ? rv.renderRecommendedSources()
+            : '';
+        if (!ideas.length) {
+            list.innerHTML = rv?.renderRadarList
+                ? rv.renderRadarList([])
+                : '<p class="feed-empty">Aucun signal pour ce filtre.</p>';
+            detail.innerHTML = `${rv?.renderRadarDetail ? rv.renderRadarDetail(null) : ''}${packHtml}`;
+            return;
+        }
+        if (!ideas.some((i) => i.theme === this._selectedRadarTheme)) {
+            this._selectedRadarTheme = ideas[0].theme;
+        }
+        const maxScore = Math.max(...ideas.map((i) => Number(i.score) || 0), 1);
+        list.innerHTML = rv?.renderRadarList
+            ? rv.renderRadarList(ideas, { selectedTheme: this._selectedRadarTheme, maxScore })
+            : '';
+        const selected = ideas.find((i) => i.theme === this._selectedRadarTheme) || ideas[0];
+        detail.innerHTML = `${rv?.renderRadarDetail ? rv.renderRadarDetail(selected) : ''}${packHtml}`;
+    }
+
+    setupWatchlistPane() {
+        document.getElementById('watchWindow')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-watch-days]');
+            if (!btn) return;
+            this.watchDays = Number(btn.dataset.watchDays) || 14;
+            document.querySelectorAll('[data-watch-days]').forEach((el) => {
+                el.classList.toggle('is-active', Number(el.dataset.watchDays) === this.watchDays);
+            });
+            this.loadWatchlist({ refresh: false });
+        });
+        document.getElementById('watchRefresh')?.addEventListener('click', () => {
+            this.loadWatchlist({ refresh: true });
+        });
+        document.getElementById('watchKeywords')?.addEventListener('click', async (e) => {
+            const del = e.target.closest('[data-watch-kw-delete]');
+            if (!del || !window.SN?.api) return;
+            try {
+                await window.SN.api.deleteWatchKeyword(Number(del.dataset.watchKwDelete));
+                this.loadWatchlist();
+            } catch (err) {
+                this.updateStatus(err.message || 'Erreur', 'error');
+            }
+        });
+        document.getElementById('watchAlerts')?.addEventListener('click', (e) => {
+            const row = e.target.closest('[data-watch-alert]');
+            if (!row) return;
+            this._selectedWatchKeyword = row.dataset.watchAlert;
+            this.renderWatchlist();
+        });
+        document.getElementById('watchDetail')?.addEventListener('click', (e) => {
+            const packBtn = e.target.closest('[data-radar-source-url]');
+            if (packBtn) {
+                const url = packBtn.dataset.radarSourceUrl;
+                if (url) this.openAddSourceModal({ url });
+                return;
+            }
+            const searchBtn = e.target.closest('[data-watch-search]');
+            if (searchBtn?.dataset.watchSearch) {
+                this.openFeedSearch(searchBtn.dataset.watchSearch);
+            }
+        });
+        document.getElementById('watchKwFormHost')?.addEventListener('submit', async (e) => {
+            const form = e.target.closest('#watchKwForm');
+            if (!form) return;
+            e.preventDefault();
+            const input = document.getElementById('watchKwInput');
+            const kw = (input?.value || '').trim();
+            if (!kw || !window.SN?.api) return;
+            try {
+                await window.SN.api.addWatchKeyword(kw);
+                if (input) input.value = '';
+                this.loadWatchlist({ refresh: true });
+            } catch (err) {
+                this.updateStatus(err.message || 'Erreur mot-cle', 'error');
+            }
+        });
+    }
+
+    async loadWatchlist({ refresh = false } = {}) {
+        const alertsEl = document.getElementById('watchAlerts');
+        if (alertsEl) alertsEl.innerHTML = '<p class="feed-empty">Scan watchlist...</p>';
+        try {
+            const api = window.SN?.api;
+            if (!api) throw new Error('API indisponible');
+            const [kwData, alertData] = await Promise.all([
+                api.getWatchKeywords(),
+                api.getWatchAlerts({ days: this.watchDays, limit: 40, refresh }),
+            ]);
+            this._watchKeywords = Array.isArray(kwData.keywords) ? kwData.keywords
+                : (Array.isArray(kwData) ? kwData : []);
+            this._watchAlerts = Array.isArray(alertData.alerts) ? alertData.alerts
+                : (Array.isArray(alertData) ? alertData : []);
+            const sub = document.getElementById('watchlistSubtitle');
+            if (sub) {
+                sub.textContent = `${this._watchKeywords.length} mots-cles · ${this._watchAlerts.length} alertes · ${this.watchDays} j`;
+            }
+            if (!this._selectedWatchKeyword && this._watchAlerts.length) {
+                this._selectedWatchKeyword = this._watchAlerts[0].keyword;
+            }
+            this.renderWatchlist();
+            if (refresh) this.updateStatus('Watchlist a jour', 'success');
+        } catch (err) {
+            console.error(err);
+            if (alertsEl) {
+                alertsEl.innerHTML = `<p class="feed-empty">Erreur watchlist (${this.escapeHtml(err.message || '')}).</p>`;
+            }
+            this.updateStatus('Erreur watchlist', 'error');
+        }
+    }
+
+    renderWatchlist() {
+        const formHost = document.getElementById('watchKwFormHost');
+        const kwEl = document.getElementById('watchKeywords');
+        const alertsEl = document.getElementById('watchAlerts');
+        const detail = document.getElementById('watchDetail');
+        const wv = window.SN?.watchlistView;
+        if (formHost && wv?.renderWatchForm) formHost.innerHTML = wv.renderWatchForm();
+        if (kwEl && wv?.renderWatchKeywords) {
+            kwEl.innerHTML = wv.renderWatchKeywords(this._watchKeywords || []);
+        }
+        if (alertsEl && wv?.renderWatchAlerts) {
+            alertsEl.innerHTML = wv.renderWatchAlerts(this._watchAlerts || [], {
+                selected: this._selectedWatchKeyword,
+            });
+        }
+        if (detail && wv?.renderWatchDetail) {
+            const selected = (this._watchAlerts || []).find(
+                (a) => a.keyword === this._selectedWatchKeyword
+            ) || null;
+            detail.innerHTML = wv.renderWatchDetail(selected);
+        }
+    }
+
+    setupBriefPane() {
+        document.getElementById('briefPeriod')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-brief-period]');
+            if (!btn) return;
+            this.briefPeriod = btn.dataset.briefPeriod === 'weekly' ? 'weekly' : 'daily';
+            document.querySelectorAll('[data-brief-period]').forEach((el) => {
+                el.classList.toggle('is-active', el.dataset.briefPeriod === this.briefPeriod);
+            });
+            this.loadBrief({ refresh: false });
+        });
+        document.getElementById('briefRefresh')?.addEventListener('click', () => {
+            this.loadBrief({ refresh: true });
+        });
+        document.getElementById('briefContent')?.addEventListener('click', async (e) => {
+            const searchBtn = e.target.closest('[data-brief-search]');
+            if (searchBtn?.dataset.briefSearch) {
+                this.openFeedSearch(searchBtn.dataset.briefSearch);
+                return;
+            }
+            const ideaBtn = e.target.closest('[data-brief-idea]');
+            if (ideaBtn && window.SN?.api?.createIdea) {
+                try {
+                    const label = this.briefPeriod === 'daily' ? 'brief quotidien' : 'brief hebdo';
+                    const note = await window.SN.api.createIdea({
+                        title: ideaBtn.dataset.briefIdea,
+                        theme: ideaBtn.dataset.briefTheme || '',
+                        problem: `Sujet du ${label} : ${ideaBtn.dataset.briefIdea}`,
+                        status: 'draft',
+                    });
+                    this._selectedIdeaId = note?.id || null;
+                    this.updateStatus('Fiche creee depuis le brief', 'success');
+                    this.showView('ideas');
+                } catch (err) {
+                    this.updateStatus(err.message || 'Erreur fiche', 'error');
+                }
+            }
+        });
+    }
+
+    async loadBrief({ refresh = false } = {}) {
+        const host = document.getElementById('briefContent');
+        if (host) host.innerHTML = '<p class="feed-empty">Generation du brief...</p>';
+        try {
+            const api = window.SN?.api;
+            if (!api) throw new Error('API indisponible');
+            const isDaily = this.briefPeriod !== 'weekly';
+            const data = isDaily
+                ? (refresh
+                    ? await api.refreshDailyBrief()
+                    : await api.getDailyBrief({ auto: true }))
+                : (refresh
+                    ? await api.refreshWeeklyBrief()
+                    : await api.getWeeklyBrief());
+            this._brief = data;
+            const sub = document.getElementById('briefSubtitle');
+            if (sub) {
+                const n = Array.isArray(data.topics) ? data.topics.length : 0;
+                const label = isDaily
+                    ? (data.day || 'aujourd\'hui')
+                    : (data.week || data.week_start || data.headline || 'semaine');
+                sub.textContent = `${n} sujets · ${isDaily ? 'quotidien' : 'hebdo'} · ${label}`;
+            }
+            this.renderBrief();
+            if (refresh) this.updateStatus('Brief genere', 'success');
+        } catch (err) {
+            console.error(err);
+            if (host) {
+                host.innerHTML = `<p class="feed-empty">Erreur brief (${this.escapeHtml(err.message || '')}).</p>`;
+            }
+            this.updateStatus('Erreur brief', 'error');
+        }
+    }
+
+    renderBrief() {
+        const host = document.getElementById('briefContent');
+        const bv = window.SN?.briefView;
+        if (!host || !bv?.renderBrief) return;
+        host.innerHTML = bv.renderBrief(this._brief);
+    }
+
+    setupCollectionsPane() {
+        document.getElementById('collectionsList')?.addEventListener('click', (e) => {
+            const row = e.target.closest('[data-collection-id]');
+            if (!row) return;
+            this._selectedCollectionId = Number(row.dataset.collectionId);
+            this.loadCollectionDetail(this._selectedCollectionId);
+        });
+        document.getElementById('collectionsDetail')?.addEventListener('click', async (e) => {
+            const openRadar = e.target.closest('[data-collection-open-radar]');
+            if (openRadar) {
+                this.radarCollectionId = Number(openRadar.dataset.collectionOpenRadar) || null;
+                this.showView('radar');
+                return;
+            }
+            const openTrends = e.target.closest('[data-collection-open-trends]');
+            if (openTrends) {
+                this.trendsCollectionId = Number(openTrends.dataset.collectionOpenTrends) || null;
+                this.showView('tendances');
+                return;
+            }
+            const remove = e.target.closest('[data-collection-remove-site]');
+            if (remove && this._selectedCollectionId && window.SN?.api) {
+                try {
+                    await window.SN.api.removeCollectionSite(
+                        this._selectedCollectionId,
+                        Number(remove.dataset.collectionRemoveSite)
+                    );
+                    this.loadCollectionDetail(this._selectedCollectionId);
+                } catch (err) {
+                    this.updateStatus(err.message || 'Erreur', 'error');
+                }
+            }
+        });
+        document.getElementById('collectionsDetail')?.addEventListener('submit', async (e) => {
+            const form = e.target.closest('#collectionAddSiteForm');
+            if (!form || !this._selectedCollectionId) return;
+            e.preventDefault();
+            const select = document.getElementById('collectionAddSiteSelect');
+            const siteId = Number(select?.value);
+            if (!siteId || !window.SN?.api) return;
+            try {
+                await window.SN.api.addCollectionSite(this._selectedCollectionId, siteId);
+                this.loadCollectionDetail(this._selectedCollectionId);
+            } catch (err) {
+                this.updateStatus(err.message || 'Erreur liaison', 'error');
+            }
+        });
+    }
+
+    async loadCollections() {
+        const list = document.getElementById('collectionsList');
+        if (list) list.innerHTML = '<p class="feed-empty">Chargement...</p>';
+        try {
+            const data = await window.SN.api.getCollections();
+            this._collections = Array.isArray(data.collections) ? data.collections
+                : (Array.isArray(data) ? data : []);
+            if (!this._selectedCollectionId && this._collections.length) {
+                this._selectedCollectionId = this._collections[0].id;
+            }
+            this.renderCollectionsList();
+            if (this._selectedCollectionId) {
+                await this.loadCollectionDetail(this._selectedCollectionId);
+            }
+        } catch (err) {
+            console.error(err);
+            if (list) {
+                list.innerHTML = `<p class="feed-empty">Erreur collections (${this.escapeHtml(err.message || '')}).</p>`;
+            }
+        }
+    }
+
+    renderCollectionsList() {
+        const list = document.getElementById('collectionsList');
+        const cv = window.SN?.collectionsView;
+        if (!list || !cv?.renderCollectionsList) return;
+        list.innerHTML = cv.renderCollectionsList(this._collections, this._selectedCollectionId);
+    }
+
+    async loadCollectionDetail(id) {
+        const detail = document.getElementById('collectionsDetail');
+        const cv = window.SN?.collectionsView;
+        if (!detail || !cv?.renderCollectionDetail) return;
+        try {
+            const col = await window.SN.api.getCollection(id);
+            this._selectedCollectionId = id;
+            this.renderCollectionsList();
+            detail.innerHTML = cv.renderCollectionDetail(col, this._sitesCache || []);
+        } catch (err) {
+            detail.innerHTML = `<p class="feed-empty">${this.escapeHtml(err.message || 'Erreur')}</p>`;
+        }
+    }
+
+    setupIdeasPane() {
+        document.getElementById('ideaCreateBlank')?.addEventListener('click', async () => {
+            if (!window.SN?.api?.createIdea) return;
+            try {
+                const note = await window.SN.api.createIdea({
+                    title: 'Nouvelle idee',
+                    status: 'draft',
+                });
+                this._selectedIdeaId = note?.id || null;
+                this.loadIdeas();
+            } catch (err) {
+                this.updateStatus(err.message || 'Erreur', 'error');
+            }
+        });
+        document.getElementById('ideasList')?.addEventListener('click', (e) => {
+            const row = e.target.closest('[data-idea-id]');
+            if (!row) return;
+            this._selectedIdeaId = Number(row.dataset.ideaId);
+            this.renderIdeas();
+        });
+        document.getElementById('ideasDetail')?.addEventListener('submit', async (e) => {
+            const form = e.target.closest('#ideaEditForm');
+            if (!form) return;
+            e.preventDefault();
+            const id = Number(form.dataset.ideaId);
+            const fd = new FormData(form);
+            const evidenceRaw = String(fd.get('evidence') || '');
+            const body = {
+                title: String(fd.get('title') || '').trim(),
+                theme: String(fd.get('theme') || '').trim(),
+                problem: String(fd.get('problem') || ''),
+                mvp_plan: String(fd.get('mvp_plan') || ''),
+                status: String(fd.get('status') || 'draft'),
+                evidence: evidenceRaw.split('\n').map((l) => l.trim()).filter(Boolean),
+            };
+            try {
+                await window.SN.api.updateIdea(id, body);
+                this.updateStatus('Fiche enregistree', 'success');
+                this.loadIdeas();
+            } catch (err) {
+                this.updateStatus(err.message || 'Erreur save', 'error');
+            }
+        });
+        document.getElementById('ideasDetail')?.addEventListener('click', async (e) => {
+            const mdBtn = e.target.closest('[data-idea-md]');
+            const dlBtn = e.target.closest('[data-idea-download]');
+            const notionBtn = e.target.closest('[data-idea-notion]');
+            const linearBtn = e.target.closest('[data-idea-linear]');
+            const delBtn = e.target.closest('[data-idea-delete]');
+            if (delBtn) {
+                if (!confirm('Supprimer cette fiche ?')) return;
+                try {
+                    await window.SN.api.deleteIdea(Number(delBtn.dataset.ideaDelete));
+                    this._selectedIdeaId = null;
+                    this.loadIdeas();
+                } catch (err) {
+                    this.updateStatus(err.message || 'Erreur', 'error');
+                }
+                return;
+            }
+            const id = Number(
+                mdBtn?.dataset.ideaMd
+                || dlBtn?.dataset.ideaDownload
+                || notionBtn?.dataset.ideaNotion
+                || linearBtn?.dataset.ideaLinear
+            );
+            if (!id) return;
+            try {
+                const data = await window.SN.api.getIdeaMarkdown(id);
+                const md = data.markdown || data.content || '';
+                const title = data.title || 'idee';
+                if (mdBtn) {
+                    await navigator.clipboard.writeText(md);
+                    this.updateStatus('Markdown copie', 'success');
+                    return;
+                }
+                if (dlBtn) {
+                    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `${String(title).replace(/[^\w\-]+/g, '_').slice(0, 40) || 'idee'}.md`;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                    return;
+                }
+                if (notionBtn) {
+                    await navigator.clipboard.writeText(md);
+                    window.open('https://www.notion.so/new', '_blank', 'noopener');
+                    this.updateStatus('Markdown copie · colle dans Notion', 'success');
+                    return;
+                }
+                if (linearBtn) {
+                    const url = `https://linear.app/new?title=${encodeURIComponent(title)}&description=${encodeURIComponent(md.slice(0, 1800))}`;
+                    window.open(url, '_blank', 'noopener');
+                }
+            } catch (err) {
+                this.updateStatus(err.message || 'Erreur export', 'error');
+            }
+        });
+    }
+
+    async loadIdeas() {
+        const list = document.getElementById('ideasList');
+        if (list) list.innerHTML = '<p class="feed-empty">Chargement...</p>';
+        try {
+            const data = await window.SN.api.getIdeas({ limit: 80 });
+            this._ideas = Array.isArray(data.ideas) ? data.ideas
+                : (Array.isArray(data) ? data : []);
+            if (!this._selectedIdeaId && this._ideas.length) {
+                this._selectedIdeaId = this._ideas[0].id;
+            }
+            const sub = document.getElementById('ideasSubtitle');
+            if (sub) sub.textContent = `${this._ideas.length} fiche${this._ideas.length > 1 ? 's' : ''}`;
+            this.renderIdeas();
+        } catch (err) {
+            console.error(err);
+            if (list) {
+                list.innerHTML = `<p class="feed-empty">Erreur fiches (${this.escapeHtml(err.message || '')}).</p>`;
+            }
+        }
+    }
+
+    renderIdeas() {
+        const list = document.getElementById('ideasList');
+        const detail = document.getElementById('ideasDetail');
+        const iv = window.SN?.ideasView;
+        if (!list || !detail || !iv) return;
+        list.innerHTML = iv.renderIdeasList(this._ideas || [], this._selectedIdeaId);
+        const selected = (this._ideas || []).find((i) => Number(i.id) === Number(this._selectedIdeaId)) || null;
+        detail.innerHTML = iv.renderIdeaDetail(selected);
+    }
+
+    pushJob(job) {
+        const entry = window.SN?.createJob
+            ? window.SN.createJob(job)
+            : {
+                id: job.id || `job-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                type: job.type || 'Crawl',
+                title: job.title || 'Tache',
+                detail: job.detail || '',
+                status: job.status || 'running',
+                siteId: job.siteId || null,
+                at: job.at || new Date().toISOString(),
+                progressCurrent: job.progressCurrent ?? null,
+                progressTotal: job.progressTotal ?? null,
+            };
+        this._jobLog = [entry, ...this._jobLog.filter((j) => j.id !== entry.id)].slice(0, 40);
+        if (this.currentView === 'jobs') this.renderJobs();
+        return entry.id;
+    }
+
+    updateJob(id, patch) {
+        const job = this._jobLog.find((j) => j.id === id);
+        if (!job) return;
+        Object.assign(job, patch, { at: patch.at || new Date().toISOString() });
+        if (this.currentView === 'jobs') this.renderJobs();
+    }
+
+    syncJobsFromSites() {
+        for (const site of this._sitesCache || []) {
+            const id = `crawl-site-${site.id}`;
+            const existing = this._jobLog.find((j) => j.id === id);
+            const status = site.status === 'completed' || site.status === 'ok'
+                ? 'done'
+                : (site.status === 'error' ? 'error' : (site.status === 'analyzing' || site.status === 'running' || site.status === 'ingesting' || site.status === 'pending' ? 'running' : 'done'));
+            const feeds = this.parseRssFeeds(site.rss_feeds);
+            const pages = Number(site.total_pages_analyzed) || 0;
+            const payload = {
+                id,
+                type: 'Crawl',
+                title: this.shortSiteLabel(site),
+                detail: status === 'done'
+                    ? `${feeds.length} flux RSS${pages ? ` · ${pages} pages` : ''}`
+                    : (site.status === 'ingesting' ? 'Import des articles RSS…' : (site.status || '')),
+                status,
+                siteId: site.id,
+                at: site.updated_at || site.created_at || new Date().toISOString(),
+                progressCurrent: pages || null,
+                progressTotal: pages || null,
+            };
+            if (!existing) this._jobLog.push(payload);
+            else Object.assign(existing, payload);
+        }
+        this._jobLog.sort((a, b) => new Date(b.at) - new Date(a.at));
+    }
+
+    renderJobs() {
+        const list = document.getElementById('jobsList');
+        const detail = document.getElementById('jobsDetail');
+        if (!list || !detail) return;
+
+        let jobs = this._jobLog.slice();
+        if (this.jobsFilter === 'running') jobs = jobs.filter((j) => j.status === 'running');
+        if (this.jobsFilter === 'done') jobs = jobs.filter((j) => j.status === 'done' || j.status === 'error');
+
+        const jv = window.SN?.jobsView;
+        if (!jobs.length) {
+            list.innerHTML = jv?.renderJobsList
+                ? jv.renderJobsList([])
+                : '<p class="feed-empty">Aucun job pour ce filtre.</p>';
+            detail.innerHTML = jv?.renderJobsDetail
+                ? jv.renderJobsDetail(null)
+                : '<p class="feed-empty">Selectionne un job pour voir le detail.</p>';
+            return;
+        }
+
+        if (!this._selectedJobId || !jobs.some((j) => j.id === this._selectedJobId)) {
+            this._selectedJobId = jobs[0].id;
+        }
+
+        list.innerHTML = jv?.renderJobsList
+            ? jv.renderJobsList(jobs, this._selectedJobId)
+            : '';
+        const selectedJob = jobs.find((j) => j.id === this._selectedJobId) || jobs[0];
+        detail.innerHTML = jv?.renderJobsDetail
+            ? jv.renderJobsDetail(selectedJob)
+            : '';
+    }
+
+    loadIdSet(key) {
+        if (window.SN?.storage) {
+            if (key === this._favStorageKey) return window.SN.storage.favorites();
+        }
+        try {
+            const raw = JSON.parse(localStorage.getItem(key) || '[]');
+            return new Set((Array.isArray(raw) ? raw : []).map(Number).filter(Boolean));
+        } catch (_) {
+            return new Set();
+        }
+    }
+
+    saveIdSet(key, set) {
+        localStorage.setItem(key, JSON.stringify([...set]));
+    }
+
+    isFavorite(articleId) {
+        if (window.SN?.storage) return window.SN.storage.isFavorite(articleId);
+        return this.loadIdSet(this._favStorageKey).has(Number(articleId));
+    }
+
+    isRead(articleId) {
+        if (window.SN?.storage) return window.SN.storage.isRead(articleId);
+        return this.loadIdSet(this._readStorageKey).has(Number(articleId));
+    }
+
+    toggleFavorite(articleId) {
+        if (window.SN?.storage) return window.SN.storage.toggleFavorite(articleId);
+        const id = Number(articleId);
+        if (!id) return false;
+        const set = this.loadIdSet(this._favStorageKey);
+        if (set.has(id)) set.delete(id);
+        else set.add(id);
+        this.saveIdSet(this._favStorageKey, set);
+        return set.has(id);
+    }
+
+    markRead(articleId, value = true) {
+        if (window.SN?.storage) return window.SN.storage.markRead(articleId, value);
+        const id = Number(articleId);
+        if (!id) return;
+        const set = this.loadIdSet(this._readStorageKey);
+        if (value) set.add(id);
+        else set.delete(id);
+        this.saveIdSet(this._readStorageKey, set);
+    }
+
+    _markViewingSite(siteId) {
+        document.querySelectorAll('.site-item[data-site-id]').forEach((el) => {
+            el.classList.toggle('is-viewing', Number(el.dataset.siteId) === Number(siteId));
+        });
+    }
+
+    _updateTopbar(_title) {
+        /* topbar retiree dans la maquette */
+    }
+
+    _setMobileReaderMode(on) {
+        const workspace = document.getElementById('workspace');
+        if (!workspace) return;
+        workspace.classList.toggle('show-reader', Boolean(on));
+    }
+
+    _readerBackButtonHtml() {
+        return `<button type="button" class="reader-back" id="readerBack" aria-label="Retour a la liste">
+            <i class="fas fa-arrow-left"></i> Retour
+        </button>`;
+    }
+
+    _bindReaderBackButton() {
+        document.getElementById('readerBack')?.addEventListener('click', () => {
+            this._setMobileReaderMode(false);
         });
     }
 
@@ -74,7 +1696,6 @@ class StreamNewsApp {
         
         this.socket.onopen = () => {
             console.log('WebSocket connecté');
-            this.updateStatus('WebSocket connecté', 'success');
         };
         
         this.socket.onmessage = (event) => {
@@ -117,6 +1738,7 @@ class StreamNewsApp {
                 break;
             case 'site_meta':
                 this.loadSites();
+                this.loadFeed({ keepSelection: true });
                 break;
             case 'article_enriched':
                 this.handleArticleEnriched(data);
@@ -160,6 +1782,14 @@ class StreamNewsApp {
             this.addPageLog(`Page analysée: ${data.url}`, 'success');
             const cur = Number(current);
             const tot = Number(this.analysisTotalPages ?? total);
+            this.updateJob(`crawl-site-${data.site_id}`, {
+                status: 'running',
+                detail: Number.isFinite(cur) && Number.isFinite(tot) && tot > 0
+                    ? `${cur} / ${tot} pages`
+                    : `Page ${cur || '?'}`,
+                progressCurrent: Number.isFinite(cur) ? cur : null,
+                progressTotal: Number.isFinite(tot) && tot > 0 ? tot : null,
+            });
             if (Number.isFinite(cur) && Number.isFinite(tot) && tot > 0 && cur >= tot) {
                 this.setLoadingText(`Crawl terminé (${cur} pages). Import des articles...`);
             }
@@ -187,21 +1817,64 @@ class StreamNewsApp {
                 this.updateStatus(`Erreur: analyse incomplete`, 'error');
                 this.showLoading(false);
                 this.currentAnalysis = null;
+                this.updateJob(`crawl-site-${data.site_id}`, { status: 'error', detail: 'Analyse incomplete' });
+                const form = document.getElementById('analyzeForm');
+                if (form) form.style.display = '';
                 this.loadSites();
                 return;
             }
             const articlesBit = data.articles_count != null ? ` · ${data.articles_count} articles` : '';
-            this.updateStatus(
-                `Analyse terminée ! ${data.rss_count} flux RSS trouvés${articlesBit}`,
-                'success'
-            );
             this.showLoading(false);
             const pages = data.total_pages ?? this.analysisTotalPages;
             if (pages != null) this.updateProgress(pages, pages);
+            this.updateJob(`crawl-site-${data.site_id}`, {
+                status: 'done',
+                detail: `${data.rss_count || 0} flux RSS${data.articles_count != null ? ` · ${data.articles_count} articles` : ''}`,
+            });
             this.loadSites();
             this.currentAnalysis = null;
-            if (data.site_id) {
-                this.showSiteDetails(Number(data.site_id));
+
+            // Toujours recharger le feed (pas seulement si 0 article)
+            const siteId = data.site_id;
+            const maybeIngest = (data.articles_count == null || Number(data.articles_count) === 0)
+                && (data.rss_count || 0) > 0
+                ? this.ensureSiteArticles(siteId)
+                : Promise.resolve(0);
+            maybeIngest.then(() => {
+                const filter = document.getElementById('feedFilter');
+                if (filter && siteId) filter.value = String(siteId);
+                return this.loadFeed({ keepSelection: false });
+            }).catch(() => this.loadFeed({ keepSelection: true }));
+
+            const settings = this.loadSettings();
+            const isFirst = (this._sitesCache || []).length <= 1;
+            const celebrate = settings.celebrateFirst && isFirst;
+            this._pendingVictorySiteId = data.site_id;
+            const victory = document.getElementById('addSourceVictory');
+            const victoryText = document.getElementById('addSourceVictoryText');
+            const form = document.getElementById('analyzeForm');
+            const progress = document.getElementById('addSourceProgress');
+            const actions = document.getElementById('addSourceActions');
+            if (form) form.hidden = true;
+            if (progress) progress.hidden = true;
+            if (actions) actions.hidden = true;
+            if (victory) {
+                victory.hidden = false;
+                if (victoryText) {
+                    victoryText.textContent = celebrate
+                        ? `${data.rss_count || 0} flux trouves${articlesBit}. Première victoire — lis ton premier article.`
+                        : `${data.rss_count || 0} flux trouves${articlesBit}. Pret a lire.`;
+                }
+                window.SN?.bus?.emit('add-source:victory', { text: victoryText?.textContent });
+                this.openAddSourceModal({ keepVictory: true });
+                // toast discret seulement (plus de bandeau "page")
+                this.updateStatus(`${data.rss_count || 0} flux RSS prets`, 'success');
+            } else if (data.site_id) {
+                this.updateStatus(
+                    `Analyse terminée ! ${data.rss_count} flux RSS trouvés${articlesBit}`,
+                    'success'
+                );
+                this.showView('feed');
             }
         }
     }
@@ -244,13 +1917,18 @@ class StreamNewsApp {
     async handleAnalyzeSubmit(e) {
         e.preventDefault();
         
-        const formData = new FormData(e.target);
-        const url = formData.get('url');
-        const maxPages = parseInt(formData.get('maxPages'), 10);
-        const depth = parseInt(formData.get('depth'), 10);
+        const urlField = document.getElementById('url');
+        const url = String(urlField?.value || urlField?.getAttribute?.('value') || '').trim();
+        const maxPages = parseInt(document.getElementById('maxPages')?.value, 10);
+        const depth = parseInt(document.getElementById('depth')?.value, 10);
         
         if (!url) {
             this.updateStatus('Veuillez saisir une URL', 'error');
+            urlField?.focus?.();
+            return;
+        }
+        if (!/^https?:\/\//i.test(url)) {
+            this.updateStatus('L\'URL doit commencer par http:// ou https://', 'error');
             return;
         }
 
@@ -259,36 +1937,54 @@ class StreamNewsApp {
         
         try {
             this.updateStatus('Lancement de l\'analyse...', 'info');
+            this.openAddSourceModal();
             this.showLoading(true);
             this.setLoadingText('Lancement...');
             this.clearResults();
-            
-            const response = await fetch('/api/analyze', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    url: url,
+            document.getElementById('addSourceVictory')?.setAttribute('hidden', '');
+            const form = document.getElementById('analyzeForm');
+            if (form) form.hidden = true;
+
+            const result = window.SN?.api
+                ? await window.SN.api.analyze({
+                    url,
                     max_pages: this.analysisMaxPages,
-                    depth: depth
+                    depth,
                 })
+                : await (async () => {
+                    const response = await fetch('/api/analyze', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            url,
+                            max_pages: this.analysisMaxPages,
+                            depth,
+                        }),
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.error || 'Erreur lors du lancement');
+                    return data;
+                })();
+
+            this.updateStatus(`Analyse lancée (ID: ${result.site_id})`, 'success');
+            this.currentAnalysis = Number(result.site_id);
+            this._activeCrawlJobId = this.pushJob({
+                id: `crawl-site-${result.site_id}`,
+                type: 'Crawl',
+                title: url,
+                detail: 'Discovery des liens…',
+                status: 'running',
+                siteId: result.site_id,
             });
-            
-            const result = await response.json();
-            
-            if (response.ok) {
-                this.updateStatus(`Analyse lancée (ID: ${result.site_id})`, 'success');
-                this.currentAnalysis = Number(result.site_id);
-                this._watchAnalysisFinish(Number(result.site_id));
-            } else {
-                throw new Error(result.error || 'Erreur lors du lancement');
-            }
+            this.showView('sources');
+            this._watchAnalysisFinish(Number(result.site_id));
             
         } catch (error) {
             this.updateStatus(`Erreur: ${error.message}`, 'error');
             this.showLoading(false);
             this.currentAnalysis = null;
+            const form = document.getElementById('analyzeForm');
+            if (form) form.hidden = false;
         }
     }
 
@@ -339,210 +2035,272 @@ class StreamNewsApp {
         try {
             const response = await fetch('/api/sites');
             const data = await response.json();
+            this._sitesCache = Array.isArray(data.sites) ? data.sites : [];
+
+            const filter = document.getElementById('feedFilter');
+            if (filter) {
+                const current = filter.value;
+                filter.innerHTML = '<option value="all">Tous les articles</option>'
+                    + this._sitesCache.map((site) =>
+                        `<option value="${site.id}">${this.escapeHtml(this.shortSiteLabel(site))}</option>`
+                    ).join('');
+                filter.value = this._sitesCache.some((s) => String(s.id) === current) ? current : 'all';
+            }
+            this.syncSourceChips();
             
             const sitesList = document.getElementById('sitesList');
-            
-            if (data.sites && data.sites.length > 0) {
-                sitesList.innerHTML = data.sites.map(site => {
-                    const feeds = this.parseRssFeeds(site.rss_feeds);
-                    const title = site.site_title || site.url;
-                    const favicon = site.favicon_url
-                        ? `<img class="site-favicon js-hide-on-error" src="${this.escapeAttr(site.favicon_url)}" alt="" width="20" height="20" loading="lazy">`
-                        : `<span class="site-favicon site-favicon-fallback" aria-hidden="true"></span>`;
-                    const desc = site.meta_description
-                        ? `<div class="site-desc">${this.escapeHtml(site.meta_description.slice(0, 140))}${site.meta_description.length > 140 ? '…' : ''}</div>`
-                        : '';
-                    return `
-                    <div class="site-item" data-site-id="${site.id}" role="button" tabindex="0">
-                        <div class="site-item-header">
-                            <div class="site-title-row">
-                                ${favicon}
-                                <div class="site-title-block">
-                                    <h4>${this.escapeHtml(title)}</h4>
-                                    <div class="site-url">${this.escapeHtml(site.url)}</div>
-                                </div>
-                            </div>
-                            <button type="button" class="btn-delete" data-delete-site="${site.id}" title="Supprimer le site">
-                                Supprimer
-                            </button>
-                        </div>
-                        ${desc}
-                        <div class="site-info">
-                            <span class="status ${site.status}">${this.getStatusText(site.status)}</span>
-                            <span class="date">${new Date(site.created_at).toLocaleString()}</span>
-                        </div>
-                        ${site.total_pages_analyzed ? `<div>Pages: ${site.total_pages_analyzed}</div>` : ''}
-                        ${feeds.length > 0 ? `<div>RSS: ${feeds.length}</div>` : ''}
-                    </div>
-                `;
-                }).join('');
-            } else {
-                sitesList.innerHTML = '<p>Aucun site analysé pour le moment</p>';
+            if (sitesList) {
+                const sv = window.SN?.sourcesView;
+                sitesList.innerHTML = sv?.renderSourcesList
+                    ? sv.renderSourcesList(this._sitesCache, { viewingSiteId: this.viewingSiteId })
+                    : '<p class="feed-empty">Impossible d\'afficher les sources.</p>';
             }
+            this.syncJobsFromSites();
         } catch (error) {
             console.error('Erreur lors du chargement des sites:', error);
         }
     }
 
-    async showSiteDetails(siteId) {
+    async loadFeed({ keepSelection = true } = {}) {
+        const feedList = document.getElementById('feedList');
+        if (!feedList) return;
+
         try {
-            this.viewingSiteId = siteId;
-            this.selectedArticleId = null;
-            this._clearArticlePoll();
-
-            const [siteRes, articlesRes] = await Promise.all([
-                fetch(`/api/sites/${siteId}`),
-                fetch(`/api/sites/${siteId}/articles?limit=100`)
-            ]);
-            const site = await siteRes.json();
-            const articlesData = articlesRes.ok ? await articlesRes.json() : { articles: [] };
-            const feeds = this.parseRssFeeds(site.rss_feeds);
-            const articles = Array.isArray(articlesData.articles) ? articlesData.articles : [];
-            
-            this.clearResults();
-            this.showResults();
-            
-            const resultsDiv = document.getElementById('results');
-            const extra = site.meta_extra && typeof site.meta_extra === 'object' ? site.meta_extra : {};
-            const favicon = site.favicon_url
-                ? `<img class="site-favicon site-favicon-lg js-hide-on-error" src="${this.escapeAttr(site.favicon_url)}" alt="" width="32" height="32">`
-                : '';
-            resultsDiv.innerHTML = `
-                <h3>Détails de l'analyse</h3>
-                <div class="site-details">
-                    <div class="site-title-row" style="margin-bottom:12px">
-                        ${favicon}
-                        <div>
-                            <h4 style="margin:0 0 4px">${this.escapeHtml(site.site_title || site.url)}</h4>
-                            <p style="margin:0"><a href="${this.escapeAttr(site.url)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(site.url)}</a></p>
-                        </div>
-                    </div>
-                    ${site.meta_description ? `<p>${this.escapeHtml(site.meta_description)}</p>` : ''}
-                    ${extra.og_image ? `<p><img class="js-hide-on-error" src="${this.escapeAttr(extra.og_image)}" alt="" style="max-width:100%;max-height:160px;border-radius:8px"></p>` : ''}
-                    <p><strong>Statut:</strong> <span class="status ${site.status}">${this.getStatusText(site.status)}</span></p>
-                    <p><strong>Pages analysées:</strong> ${site.total_pages_analyzed || 0}</p>
-                    <p><strong>Date:</strong> ${new Date(site.created_at).toLocaleString()}</p>
-                    <p style="margin-top:12px">
-                        <button type="button" class="btn btn-danger" data-delete-site-detail="${siteId}" style="width:auto;padding:10px 16px;font-size:14px;background:linear-gradient(135deg,#c0392b 0%,#922b21 100%)">
-                            Supprimer ce site
-                        </button>
-                    </p>
-                </div>
-                
-                ${feeds.length > 0 ? `
-                    <h4>Flux RSS trouvés (${feeds.length})</h4>
-                    <div class="rss-feeds">
-                        ${feeds.map(feed => `
-                            <div class="rss-feed">
-                                <h4>${this.escapeHtml(feed.title || 'Flux RSS')}</h4>
-                                <p><a href="${this.escapeAttr(feed.url)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(feed.url)}</a></p>
-                                <small>Type: ${this.escapeHtml(feed.type || '-')} | Source: ${this.escapeHtml(feed.source_page || '-')}</small>
-                            </div>
-                        `).join('')}
-                    </div>
-                    <p style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
-                        <button type="button" class="btn" data-ingest-site="${siteId}" style="width:auto;padding:10px 16px;font-size:14px">
-                            Recharger les articles des flux
-                        </button>
-                        ${articles.length > 0 ? `
-                            <button type="button" class="btn" data-enrich-site="${siteId}" style="width:auto;padding:10px 16px;font-size:14px;background:linear-gradient(135deg,#2c7a7b 0%,#285e61 100%)">
-                                Enrichir les articles
-                            </button>
-                            <button type="button" class="btn" data-analyze-site="${siteId}" style="width:auto;padding:10px 16px;font-size:14px;background:linear-gradient(135deg,#4c51bf 0%,#553c9a 100%)">
-                                Analyser le texte
-                            </button>
-                        ` : ''}
-                    </p>
-                ` : '<p>Aucun flux RSS trouvé</p>'}
-
-                <h4 style="margin-top:24px">Articles (${articles.length})</h4>
-                ${articles.length > 0 ? `
-                    <div class="articles-layout" data-testid="articles-layout">
-                        <div class="articles-list-pane rss-feeds" data-testid="articles-list">
-                            ${articles.map(article => this.renderArticleListItem(article)).join('')}
-                        </div>
-                        <div class="article-reader empty" id="articleReader" data-testid="article-reader">
-                            Clique un article pour lire le contenu
-                        </div>
-                    </div>
-                ` : '<p>Aucun article importé pour le moment. Lance une analyse ou clique « Recharger les articles ».</p>'}
-            `;
-
-            const ingestBtn = resultsDiv.querySelector('[data-ingest-site]');
-            if (ingestBtn) {
-                ingestBtn.addEventListener('click', async () => {
-                    ingestBtn.disabled = true;
-                    ingestBtn.textContent = 'Import en cours…';
-                    try {
-                        const res = await fetch(`/api/sites/${siteId}/ingest-articles`, { method: 'POST' });
-                        const data = await res.json();
-                        if (!res.ok) throw new Error(data.error || 'Erreur import');
-                        this.updateStatus(`${data.articles_count || 0} articles traités`, 'success');
-                        await this.showSiteDetails(siteId);
-                    } catch (err) {
-                        this.updateStatus(`Erreur: ${err.message}`, 'error');
-                        ingestBtn.disabled = false;
-                        ingestBtn.textContent = 'Recharger les articles des flux';
-                    }
-                });
+            if (!this._sitesCache.length) {
+                const response = await fetch('/api/sites');
+                const data = await response.json();
+                this._sitesCache = Array.isArray(data.sites) ? data.sites : [];
             }
 
-            const enrichBtn = resultsDiv.querySelector('[data-enrich-site]');
-            if (enrichBtn) {
-                enrichBtn.addEventListener('click', async () => {
-                    enrichBtn.disabled = true;
-                    enrichBtn.textContent = 'Enrichissement lancé…';
-                    try {
-                        const res = await fetch(`/api/sites/${siteId}/enrich-articles?limit=50`, { method: 'POST' });
-                        const data = await res.json();
-                        if (!res.ok) throw new Error(data.error || 'Erreur enrichissement');
-                        this.updateStatus('Enrichissement en file (les articles se mettront a jour)', 'success');
-                        enrichBtn.textContent = 'Enrichir les articles';
-                        enrichBtn.disabled = false;
-                    } catch (err) {
-                        this.updateStatus(`Erreur: ${err.message}`, 'error');
-                        enrichBtn.disabled = false;
-                        enrichBtn.textContent = 'Enrichir les articles';
-                    }
-                });
+            const filterVal = document.getElementById('feedFilter')?.value || 'all';
+            const siteIds = filterVal === 'all'
+                ? this._sitesCache.map((s) => s.id)
+                : [Number(filterVal)].filter(Boolean);
+
+            if (!siteIds.length) {
+                this._feedArticles = [];
+                this.renderFeedList({ keepSelection: false, autoSelect: false });
+                return;
             }
 
-            const analyzeSiteBtn = resultsDiv.querySelector('[data-analyze-site]');
-            if (analyzeSiteBtn) {
-                analyzeSiteBtn.addEventListener('click', async () => {
-                    analyzeSiteBtn.disabled = true;
-                    analyzeSiteBtn.textContent = 'Analyse lancée…';
-                    try {
-                        const res = await fetch(`/api/sites/${siteId}/analyze-articles?limit=50`, { method: 'POST' });
-                        const data = await res.json();
-                        if (!res.ok) throw new Error(data.error || 'Erreur analyse');
-                        this.updateStatus('Analyse texte en file (les articles se mettront a jour)', 'success');
-                        analyzeSiteBtn.textContent = 'Analyser le texte';
-                        analyzeSiteBtn.disabled = false;
-                    } catch (err) {
-                        this.updateStatus(`Erreur: ${err.message}`, 'error');
-                        analyzeSiteBtn.disabled = false;
-                        analyzeSiteBtn.textContent = 'Analyser le texte';
-                    }
-                });
-            }
+            const batches = await Promise.all(siteIds.map(async (siteId) => {
+                const res = await fetch(`/api/sites/${siteId}/articles?limit=100`);
+                if (!res.ok) {
+                    console.warn('Feed site', siteId, 'HTTP', res.status);
+                    return { siteId, articles: [], error: true };
+                }
+                const data = await res.json();
+                const site = this._sitesCache.find((s) => Number(s.id) === Number(siteId));
+                const siteLabel = this.shortSiteLabel(site);
+                const articles = (data.articles || [])
+                    .filter((article) => !this.isNoiseArticle(article))
+                    .map((article) => ({
+                        ...article,
+                        title: this.cleanArticleTitle(article.title, site),
+                        _siteTitle: site?.site_title || site?.url || this.articleDomain(article),
+                        _siteLabel: siteLabel,
+                        _siteId: siteId,
+                    }));
+                return { siteId, articles, error: false };
+            }));
 
-            const deleteDetailBtn = resultsDiv.querySelector('[data-delete-site-detail]');
-            if (deleteDetailBtn) {
-                deleteDetailBtn.addEventListener('click', () => this.deleteSite(siteId));
-            }
-
-            resultsDiv.querySelectorAll('[data-article-id]').forEach((el) => {
-                el.addEventListener('click', (e) => {
-                    if (e.target.closest('a')) return;
-                    const id = Number(el.dataset.articleId);
-                    if (id) this.selectArticle(id);
-                });
+            const failed = batches.filter((b) => b.error);
+            let articles = batches.flatMap((b) => b.articles);
+            articles.sort((a, b) => {
+                const da = new Date(a.published_at || 0).getTime();
+                const db = new Date(b.published_at || 0).getTime();
+                return db - da;
             });
-            
+            // Dedup by link/guid (plusieurs flux peuvent renvoyer le meme article)
+            const seen = new Set();
+            articles = articles.filter((a) => {
+                const key = (a.guid || a.link || `${a.id}`).toLowerCase();
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+            this._feedArticles = articles;
+            this._feedLoadMeta = {
+                filterVal,
+                failedSiteIds: failed.map((b) => b.siteId),
+                emptySiteIds: siteIds.filter((id) => {
+                    const batch = batches.find((b) => Number(b.siteId) === Number(id));
+                    return batch && !batch.error && batch.articles.length === 0;
+                }),
+            };
+            this.renderFeedList({ keepSelection, autoSelect: true });
+            if (failed.length && !articles.length) {
+                this.updateStatus('Impossible de charger les articles (analyzer?)', 'error');
+            }
         } catch (error) {
-            console.error('Erreur lors du chargement des détails:', error);
+            console.error('Erreur feed:', error);
+            feedList.innerHTML = '<p class="feed-empty">Impossible de charger le feed.</p>';
         }
+    }
+
+    visibleFeedArticles() {
+        let articles = this._feedArticles || [];
+        if (this.feedMode === 'favorites') {
+            const favs = this.loadIdSet(this._favStorageKey);
+            articles = articles.filter((a) => favs.has(Number(a.id)));
+        }
+        return articles;
+    }
+
+    renderFeedList({ keepSelection = true, autoSelect = false } = {}) {
+        const feedList = document.getElementById('feedList');
+        if (!feedList) return;
+
+        const fv = window.SN?.feedView;
+        const filterVal = document.getElementById('feedFilter')?.value || 'all';
+        const filteredSite = filterVal !== 'all'
+            ? (this._sitesCache || []).find((s) => Number(s.id) === Number(filterVal))
+            : null;
+        const articles = this.visibleFeedArticles();
+        if (fv?.updateFeedHeader) {
+            fv.updateFeedHeader(this.feedMode, {
+                count: articles.length,
+                sourceLabel: filteredSite ? this.shortSiteLabel(filteredSite) : null,
+            });
+        } else {
+            const titleEl = document.getElementById('feedTitle') || document.querySelector('.feed-header h1');
+            const subEl = document.getElementById('feedSubtitle');
+            if (titleEl) titleEl.textContent = this.feedMode === 'favorites' ? 'Favoris' : 'Feed';
+            if (subEl) {
+                subEl.textContent = this.feedMode === 'favorites'
+                    ? 'Tes articles sauvegardes'
+                    : 'Tous tes articles, toutes sources confondues';
+            }
+        }
+
+        if (!articles.length) {
+            const noSources = !(this._sitesCache || []).length;
+            const feedCount = filteredSite ? this.parseRssFeeds(filteredSite.rss_feeds).length : 0;
+            feedList.innerHTML = fv?.renderFeedEmptyHtml
+                ? fv.renderFeedEmptyHtml({
+                    feedMode: this.feedMode,
+                    noSources,
+                    filteredSite,
+                    feedCount,
+                    loadFailed: Boolean(this._feedLoadMeta?.failedSiteIds?.length),
+                })
+                : '<p class="feed-empty">Aucun article.</p>';
+
+            if (this.feedMode === 'favorites' || noSources || filteredSite) {
+                const reader = document.getElementById('articleReader');
+                if (reader) {
+                    reader.className = 'article-reader empty reader-empty-state';
+                    reader.innerHTML = fv?.renderReaderEmptyMessage
+                        ? fv.renderReaderEmptyMessage({ feedMode: this.feedMode, noSources })
+                        : 'Selectionne un article.';
+                }
+            }
+            return;
+        }
+
+        feedList.innerHTML = articles.map((article) => this.renderArticleListItem(article)).join('');
+
+        if (!autoSelect) return;
+        const prev = keepSelection ? this.selectedArticleId : null;
+        const targetId = prev && articles.some((a) => a.id === prev)
+            ? prev
+            : articles[0].id;
+        this.selectArticle(targetId);
+    }
+
+    formatRelativeTime(dateStr) {
+        if (!dateStr) return '';
+        const date = new Date(dateStr);
+        if (Number.isNaN(date.getTime())) return '';
+        const diffMs = Date.now() - date.getTime();
+        // Dates futures (events) : afficher la date absolue
+        if (diffMs < -60 * 1000) {
+            return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+        const mins = Math.floor(Math.max(0, diffMs) / 60000);
+        if (mins < 1) return 'A l\'instant';
+        if (mins < 60) return `Il y a ${mins} min`;
+        const hours = Math.floor(mins / 60);
+        if (hours < 24) return `Il y a ${hours} h`;
+        const days = Math.floor(hours / 24);
+        if (days < 7) return `Il y a ${days} j`;
+        return date.toLocaleDateString('fr-FR');
+    }
+
+    cleanArticleTitle(title, site) {
+        let t = String(title || '').trim();
+        if (!t) return 'Sans titre';
+        const suffixes = [];
+        if (site?.site_title) suffixes.push(site.site_title);
+        try {
+            const host = new URL(site?.url || '').hostname.replace(/^www\./, '');
+            if (host) suffixes.push(host);
+        } catch (_) { /* ignore */ }
+        suffixes.push("METZ TECHNO'PÔLES", 'METZ TECHNO’PÔLES');
+        for (const s of suffixes) {
+            if (!s) continue;
+            const re = new RegExp(`\\s*[|–—-]\\s*${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+            t = t.replace(re, '').trim();
+        }
+        return t || String(title || '').trim();
+    }
+
+    shortSiteLabel(site) {
+        if (!site) return 'Source';
+        const title = String(site.site_title || '').trim();
+        if (title && title.length <= 28) return title;
+        try {
+            return new URL(site.url).hostname.replace(/^www\./, '');
+        } catch (_) {
+            return title.slice(0, 28) || 'Source';
+        }
+    }
+
+    isNoiseArticle(article) {
+        const feed = String(article.feed_url || '').toLowerCase();
+        const title = String(article.title || '').trim();
+        const titleLow = title.toLowerCase();
+        if (feed.includes('/comments/') || feed.includes('comments/feed')) return true;
+        if (feed.includes('sample-page/feed')) return true;
+        if (titleLow.startsWith('commentaires sur ')) return true;
+        if (titleLow.startsWith('comments on ')) return true;
+        if (/^par\s*:/i.test(title)) return true;
+        if (title.length < 8) return true;
+        if (/^hello world$/i.test(titleLow)) return true;
+        // Pingbacks / commentaires WordPress souvent tres courts
+        const summary = String(article.summary || '').trim();
+        if (summary.length > 0 && summary.length < 40 && /hello world|itstitle|here/i.test(summary)) {
+            return true;
+        }
+        return false;
+    }
+
+    entityPillClass(label) {
+        const l = String(label || '').toUpperCase();
+        if (l === 'PER' || l === 'PERSON') return 'per';
+        if (l === 'ORG' || l === 'ORGANIZATION') return 'org';
+        if (l === 'LOC' || l === 'GPE' || l === 'LOCATION') return 'loc';
+        return 'org';
+    }
+
+    entityCategoryFr(label) {
+        const map = {
+            ORG: 'ORGANISATION',
+            PER: 'PERSONNE',
+            PERSON: 'PERSONNE',
+            LOC: 'LIEU',
+            GPE: 'LIEU',
+            LOCATION: 'LIEU',
+            MISC: 'AUTRE',
+        };
+        return map[String(label || '').toUpperCase()] || 'ENTITE';
+    }
+
+    async showSiteDetails(siteId) {
+        const filter = document.getElementById('feedFilter');
+        if (filter) filter.value = String(siteId);
+        this.showView('feed');
+        await this.loadFeed({ keepSelection: false });
     }
 
     articleMeta(article) {
@@ -797,8 +2555,73 @@ class StreamNewsApp {
 
     prepareArticleBodyHtml(article, hero) {
         if (!article?.content_html) return '';
-        if (!hero) return article.content_html;
-        return this.stripHeroImagesFromHtml(article.content_html, hero, article);
+        let html = article.content_html;
+        if (hero) html = this.stripHeroImagesFromHtml(html, hero, article);
+        return this.stripLeadingTitleFromHtml(html, article.title);
+    }
+
+    normalizeComparableText(text) {
+        return String(text || '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[«»""']/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    stripLeadingTitleFromHtml(html, title) {
+        if (!html || !title) return html || '';
+        const wanted = this.normalizeComparableText(title);
+        if (wanted.length < 8) return html;
+
+        const tmp = document.createElement('div');
+        tmp.innerHTML = String(html);
+        const candidates = tmp.querySelectorAll('h1, h2, h3, h4, .entry-title');
+        for (const el of candidates) {
+            const got = this.normalizeComparableText(el.textContent);
+            if (!got) continue;
+            if (got === wanted || got.includes(wanted) || wanted.includes(got)) {
+                el.remove();
+                break;
+            }
+        }
+        return tmp.innerHTML;
+    }
+
+    isUsefulKeyword(kw) {
+        const s = String(kw || '')
+            .trim()
+            .replace(/[\u2018\u2019\u02BC]/g, "'")
+            .replace(/\s+/g, ' ');
+        if (s.length < 3 || s.length > 42) return false;
+        const words = s.split(' ');
+        if (words.length > 3) return false;
+        const low = s.toLowerCase();
+        if (/\b(c'?est|m'?appelle|je suis|nous sommes|vous etes|vous êtes|qui êtes|qui etes|presentez|présentez|parlez|rôle|role|responsable de)\b/i.test(low)) {
+            return false;
+        }
+        if (/^(le|la|les|un|une|des|du|de|d'|l'|et|ou|en|au|aux)\b/i.test(low) && words.length === 1) {
+            return false;
+        }
+        if (/[,:;!?]/.test(s)) return false;
+        return true;
+    }
+
+    normalizeKeywords(list, limit = 6) {
+        const out = [];
+        const seen = [];
+        for (const raw of list || []) {
+            const kw = String(raw || '').trim().replace(/\s+/g, ' ');
+            if (!this.isUsefulKeyword(kw)) continue;
+            const key = this.normalizeComparableText(kw);
+            if (!key) continue;
+            if (seen.some((s) => s === key || s.includes(key) || key.includes(s))) continue;
+            seen.push(key);
+            out.push(kw);
+            if (out.length >= limit) break;
+        }
+        return out;
     }
 
     splitSummaryParts(text) {
@@ -916,39 +2739,40 @@ class StreamNewsApp {
         return mins === 1 ? '1 min de lecture' : `${mins} min de lecture`;
     }
 
-    renderArticleListItem(article) {
-        const status = article.enrich_status || '';
-        const badge = status
-            ? `<span class="article-enrich-badge ${this.escapeAttr(status)}">${this.escapeHtml(this.enrichStatusLabel(status))}</span>`
-            : '';
-        const analysisStatus = this.articleAnalysisStatus(article);
-        const analysisBadge = analysisStatus
-            ? `<span class="article-analysis-badge ${this.escapeAttr(analysisStatus)}">${this.escapeHtml(this.analysisStatusLabel(analysisStatus))}</span>`
-            : '';
-        const selected = this.selectedArticleId === article.id ? ' is-selected' : '';
-        const hero = this.articleHero(article);
-        const heroBlock = hero
-            ? this.renderHeroImg(hero, { wrapperClass: 'article-item-hero', imgClass: 'article-item-hero-img' })
-            : '';
-        const noThumbClass = hero ? '' : ' article-item--no-thumb';
-        const domain = this.articleDomain(article);
-        const chapo = this.articleChapo(article);
-        const dateStr = article.published_at
-            ? new Date(article.published_at).toLocaleDateString()
-            : 'Date inconnue';
+    articleListKeywords(article) {
+        const blocks = this.articleAnalysisBlocks(article);
+        const yake = blocks.keywords_yake;
+        if (yake?.status === 'ok' && Array.isArray(yake.keywords) && yake.keywords.length) {
+            return this.normalizeKeywords(yake.keywords, 2);
+        }
+        const meta = this.articleMeta(article);
+        if (Array.isArray(meta.keywords) && meta.keywords.length) {
+            return this.normalizeKeywords(meta.keywords, 2);
+        }
+        return [];
+    }
 
-        return `
-            <div class="rss-feed article-item${selected}${noThumbClass}" data-article-id="${article.id}">
-                <div class="article-item-body">
-                    <h4>${this.escapeHtml(article.title || 'Sans titre')}${badge}${analysisBadge}</h4>
-                    ${heroBlock}
-                    ${chapo ? `<p>${this.escapeHtml(chapo.slice(0, 140))}${chapo.length > 140 ? '…' : ''}</p>` : ''}
-                    <small class="article-item-meta">
-                        ${domain ? `${this.escapeHtml(domain)} · ` : ''}${this.escapeHtml(dateStr)}
-                    </small>
-                </div>
-            </div>
-        `;
+    renderArticleListItem(article) {
+        const fv = window.SN?.feedView;
+        const source = article._siteLabel
+            || this.articleDomain(article)
+            || article._siteTitle
+            || 'Source';
+        const ctx = {
+            selectedArticleId: this.selectedArticleId,
+            isFavorite: this.isFavorite(article.id),
+            isRead: this.isRead(article.id),
+            keywords: this.articleListKeywords(article),
+            hero: this.articleHero(article),
+            source,
+        };
+        if (fv?.renderFeedRow) return fv.renderFeedRow(article, ctx);
+
+        // Fallback legacy
+        const selected = this.selectedArticleId === article.id ? ' is-selected' : '';
+        return `<button type="button" class="feed-row${selected}" data-article-id="${article.id}">
+            <h3>${this.escapeHtml(article.title || 'Sans titre')}</h3>
+        </button>`;
     }
 
     _clearArticlePoll() {
@@ -967,18 +2791,34 @@ class StreamNewsApp {
 
     async selectArticle(articleId) {
         this.selectedArticleId = articleId;
-        document.querySelectorAll('.article-item').forEach((el) => {
+        document.querySelectorAll('.feed-row, .article-item').forEach((el) => {
             el.classList.toggle('is-selected', Number(el.dataset.articleId) === articleId);
         });
+        if (this.loadSettings().autoMarkRead) {
+            this.markRead(articleId, true);
+        }
+        this._setMobileReaderMode(true);
 
         const reader = document.getElementById('articleReader');
         if (!reader) return;
         reader.classList.remove('empty');
-        reader.innerHTML = `<p class="reader-meta">Chargement…</p>`;
+        reader.innerHTML = `
+            ${this._readerBackButtonHtml()}
+            <p class="reader-meta">Chargement…</p>
+        `;
+        this._bindReaderBackButton();
 
         try {
             let article = await this.fetchArticle(articleId);
             if (!article) throw new Error('Article introuvable');
+            const cached = this._feedArticles.find((a) => a.id === articleId);
+            if (cached?._siteTitle) article._siteTitle = cached._siteTitle;
+            if (cached?._siteLabel) article._siteLabel = cached._siteLabel;
+            if (cached?.title) article.title = cached.title;
+            else {
+                const site = this._sitesCache.find((s) => Number(s.id) === Number(article.site_id));
+                article.title = this.cleanArticleTitle(article.title, site);
+            }
 
             if (article.enrich_status !== 'ok' && article.enrich_status !== 'pending') {
                 await fetch(`/api/articles/${articleId}/enrich`, { method: 'POST' });
@@ -1132,7 +2972,8 @@ class StreamNewsApp {
 
         const hasLang = langBlock?.status === 'ok' && langBlock.lang;
         const yakeKws = yakeBlock?.status === 'ok' && Array.isArray(yakeBlock.keywords)
-            ? yakeBlock.keywords : [];
+            ? this.normalizeKeywords(yakeBlock.keywords, 8)
+            : [];
         const summaryHtml = sumyBlock?.status === 'ok' ? this.formatSummaryParagraphs(sumyBlock) : '';
         const entities = nerBlock?.status === 'ok' && Array.isArray(nerBlock.entities)
             ? nerBlock.entities : [];
@@ -1210,126 +3051,118 @@ class StreamNewsApp {
     renderArticleReader(article, { loading, loadingAnalysis } = {}) {
         const reader = document.getElementById('articleReader');
         if (!reader || this.selectedArticleId !== article.id) return;
-        reader.classList.remove('empty');
+        reader.classList.remove('empty', 'reader-empty-state');
 
-        // Ne pas afficher "enrichissement..." si deja enrichi (race WS / poll)
         if (loading && article.enrich_status === 'ok') loading = false;
 
         const meta = this.articleMeta(article);
         const hero = this.pickArticleHero(article);
         const gallery = this.articleImages(article, hero);
-        const author = article.author || meta.author || '';
         const published = article.published_at
-            ? new Date(article.published_at).toLocaleString()
+            ? new Date(article.published_at).toLocaleString('fr-FR', {
+                day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+            })
             : (meta.date_published || '');
         const chapo = this.articleChapo(article);
-        const domain = this.articleDomain(article);
-        const reading = this.formatReadingTime(meta);
-        const keywords = Array.isArray(meta.keywords) ? meta.keywords : [];
-        const status = article.enrich_status || '';
-        const statusBadge = status
-            ? `<span class="article-enrich-badge ${this.escapeAttr(status)}">${this.escapeHtml(this.enrichStatusLabel(status))}</span>`
-            : '';
-        const analysisStatus = meta.analysis_status || '';
-        const analysisBadge = analysisStatus
-            ? `<span class="article-analysis-badge ${this.escapeAttr(analysisStatus)}">${this.escapeHtml(this.analysisStatusLabel(analysisStatus))}</span>`
-            : '';
-        const typeBadge = meta.schema_type || meta.og_type
-            ? `<span class="reader-type-badge">${this.escapeHtml(meta.schema_type || meta.og_type)}</span>`
-            : '';
+        const sourceName = article._siteLabel || this.articleDomain(article) || article._siteTitle || 'Source';
+        const blocks = this.articleAnalysisBlocks(article);
+        const sumyBlock = blocks.summary_sumy;
+        const nerBlock = blocks.ner_spacy;
+        const rv = window.SN?.readerView;
 
-        let bodyHtml = '';
-        if (loading) {
-            bodyHtml = `<p class="reader-meta">Enrichissement en cours (fetch de la page)…</p>
-                ${chapo ? `<p class="reader-chapo">${this.escapeHtml(chapo)}</p>` : ''}`;
-        } else if (article.enrich_status === 'error') {
-            bodyHtml = `<p class="reader-meta">Enrichissement echoue: ${this.escapeHtml(article.enrich_error || 'erreur')}</p>
-                ${chapo ? `<p class="reader-chapo">${this.escapeHtml(chapo)}</p>` : ''}`;
-        } else if (article.content_html) {
-            const cleanedHtml = this.prepareArticleBodyHtml(article, hero);
-            bodyHtml = `<div class="reader-body">${cleanedHtml}</div>`;
-        } else if (article.content_text) {
-            bodyHtml = `<div class="reader-body"><p>${this.escapeHtml(article.content_text).replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>')}</p></div>`;
-        } else if (chapo) {
-            bodyHtml = `<p class="reader-chapo">${this.escapeHtml(chapo)}</p>`;
-        } else {
-            bodyHtml = `<p class="reader-meta">Pas de contenu disponible</p>`;
+        const summaryHtml = rv?.buildSummaryHtml
+            ? rv.buildSummaryHtml({
+                loadingAnalysis,
+                analysisPending: meta.analysis_status === 'pending',
+                sumyBlock,
+                chapo,
+                escapeHtml: (t) => this.escapeHtml(t),
+            })
+            : `<p>${this.escapeHtml(chapo || 'Resume indisponible')}</p>`;
+
+        const entities = nerBlock?.status === 'ok' && Array.isArray(nerBlock.entities)
+            ? nerBlock.entities.slice(0, 8) : [];
+        const yake = blocks.keywords_yake;
+        const keywords = (!entities.length && yake?.status === 'ok' && Array.isArray(yake.keywords))
+            ? this.normalizeKeywords(yake.keywords, 6)
+            : [];
+
+        let preparedHtml = '';
+        if (!loading && article.enrich_status !== 'error' && article.content_html) {
+            preparedHtml = this.prepareArticleBodyHtml(article, hero);
         }
-
-        const chapoBlock = (!loading && article.enrich_status !== 'error' && chapo && article.content_html)
-            ? `<p class="reader-chapo">${this.escapeHtml(chapo)}</p>`
+        const bodyHtml = rv?.buildBodyHtml
+            ? rv.buildBodyHtml({
+                loading,
+                article,
+                chapo,
+                preparedHtml,
+                escapeHtml: (t) => this.escapeHtml(t),
+            })
             : '';
 
-        const keywordsBlock = keywords.length
-            ? `<div class="reader-keywords">${keywords.map((kw) =>
-                `<span class="reader-keyword">${this.escapeHtml(kw)}</span>`).join('')}</div>`
-            : '';
-
-        const galleryBlock = gallery.length
+        const galleryHtml = gallery.length
             ? `<div class="reader-gallery">${gallery.map((img) =>
-                `<img class="js-hide-on-error" src="${this.escapeAttr(img.url)}" alt="${this.escapeAttr(img.alt || '')}" loading="lazy" title="${this.escapeAttr(img.source || '')}">`
+                `<img class="js-hide-on-error" src="${this.escapeAttr(img.url)}" alt="${this.escapeAttr(img.alt || '')}" loading="lazy">`
             ).join('')}</div>`
             : '';
 
-        const metaRows = [
-            ['Sources', (meta.sources || []).join(', ')],
-            ['Flux RSS', article.feed_url],
-            ['Schema', meta.schema_type],
-            ['OG type', meta.og_type],
-            ['Domaine', meta.domain || domain],
-            ['Canonique', meta.canonical_url],
-            ['Modifie', meta.date_modified],
-            ['Enrichi', article.enriched_at ? new Date(article.enriched_at).toLocaleString() : ''],
-            ['Images', `${(hero ? 1 : 0) + gallery.length}${hero ? ` (hero + ${gallery.length} galerie)` : ''}`],
-        ].filter(([, val]) => val);
+        const heroHtml = hero ? this.renderHeroImg(hero, { wrapperClass: 'reader-hero' }) : '';
 
-        const metaPanel = metaRows.length
-            ? `<details class="reader-meta-panel">
-                <summary>Metadonnees techniques</summary>
-                <dl>${metaRows.map(([label, val]) =>
-                    `<dt>${this.escapeHtml(label)}</dt><dd>${this.escapeHtml(String(val))}</dd>`
-                ).join('')}</dl>
-               </details>`
-            : '';
+        reader.className = 'article-reader';
+        reader.innerHTML = rv?.buildReaderHtml
+            ? rv.buildReaderHtml(article, {
+                loading,
+                loadingAnalysis,
+                backButtonHtml: this._readerBackButtonHtml(),
+                heroHtml,
+                bodyHtml,
+                galleryHtml,
+                summaryHtml,
+                entities,
+                keywords,
+                sourceName,
+                published,
+                isFavorite: this.isFavorite(article.id),
+                isRead: this.isRead(article.id),
+                showSummaryFirst: this.loadSettings().showSummaryFirst !== false,
+            })
+            : `<p>${this.escapeHtml(article.title || '')}</p>`;
 
-        const analysisPanel = this.renderAnalysisPanel(article, { loadingAnalysis });
-        const heroBlock = this.renderHeroImg(hero);
+        this._bindReaderBackButton();
 
-        reader.innerHTML = `
-            <div class="reader-badge-row">${statusBadge}${analysisBadge}${typeBadge}</div>
-            <header class="reader-header">
-                <h3>${this.escapeHtml(article.title || 'Sans titre')}</h3>
-                <div class="reader-meta">
-                    ${published ? this.escapeHtml(published) : ''}
-                    ${author ? ` · ${this.escapeHtml(author)}` : ''}
-                    ${domain ? ` · ${this.escapeHtml(domain)}` : ''}
-                    ${reading ? ` · ${this.escapeHtml(reading)}` : ''}
-                </div>
-                ${heroBlock}
-            </header>
-            ${analysisPanel}
-            <section class="reader-article-section">
-                <span class="reader-section-label">Article</span>
-                ${keywordsBlock}
-                ${chapoBlock}
-                ${bodyHtml}
-                ${galleryBlock}
-            </section>
-            <div class="reader-actions">
-                <a href="${this.escapeAttr(article.link)}" target="_blank" rel="noopener noreferrer">Ouvrir l'original</a>
-                ${article.enrich_status === 'ok' ? `
-                    · <button type="button" class="btn" data-reenrich="${article.id}" style="width:auto;padding:6px 12px;font-size:13px;display:inline-block">Relire la page</button>
-                ` : ''}
-            </div>
-            ${metaPanel}
-        `;
+        reader.querySelector('[data-reader-action="share"]')?.addEventListener('click', () => {
+            if (navigator.share) {
+                navigator.share({ title: article.title, url: article.link }).catch(() => {});
+            } else if (article.link) {
+                navigator.clipboard?.writeText(article.link);
+                this.updateStatus('Lien copie', 'success');
+            }
+        });
+        reader.querySelector('[data-reader-action="favorite"]')?.addEventListener('click', () => {
+            const nowFav = this.toggleFavorite(article.id);
+            this.updateStatus(nowFav ? 'Ajoute aux favoris' : 'Retire des favoris', 'success');
+            this.renderFeedList({ keepSelection: true, autoSelect: false });
+            this.renderArticleReader(article);
+            if (this.feedMode === 'favorites' && !nowFav) {
+                this.renderFeedList({ keepSelection: false, autoSelect: true });
+            }
+        });
+        reader.querySelector('[data-reader-action="read"]')?.addEventListener('click', () => {
+            const next = !this.isRead(article.id);
+            this.markRead(article.id, next);
+            this.updateStatus(next ? 'Marque comme lu' : 'Marque non lu', 'success');
+            this.renderFeedList({ keepSelection: true, autoSelect: false });
+            this.renderArticleReader(article);
+        });
 
         const reBtn = reader.querySelector('[data-reenrich]');
         if (reBtn) {
             reBtn.addEventListener('click', async () => {
                 reBtn.disabled = true;
                 try {
-                    await fetch(`/api/articles/${article.id}/enrich?force=1`, { method: 'POST' });
+                    if (window.SN?.api) await window.SN.api.enrichArticle(article.id, true);
+                    else await fetch(`/api/articles/${article.id}/enrich?force=1`, { method: 'POST' });
                     this.renderArticleReader(article, { loading: true });
                     this._pollArticleUntilDone(article.id);
                 } catch (err) {
@@ -1343,7 +3176,8 @@ class StreamNewsApp {
             analyzeBtn.addEventListener('click', async () => {
                 analyzeBtn.disabled = true;
                 try {
-                    await fetch(`/api/articles/${article.id}/analyze?force=1`, { method: 'POST' });
+                    if (window.SN?.api) await window.SN.api.analyzeArticle(article.id, true);
+                    else await fetch(`/api/articles/${article.id}/analyze?force=1`, { method: 'POST' });
                     this.renderArticleReader(article, { loadingAnalysis: true });
                     this._pollAnalysisUntilDone(article.id);
                 } catch (err) {
@@ -1358,9 +3192,33 @@ class StreamNewsApp {
         const articleId = Number(data.article_id);
         if (!articleId) return;
         this._updateArticleBadge(articleId, data.status);
+        // Refresh feed row thumbnail / chips after enrich
+        if (data.status === 'ok') {
+            this.fetchArticle(articleId).then((article) => {
+                const idx = this._feedArticles.findIndex((a) => a.id === articleId);
+                if (idx >= 0) {
+                    const prev = this._feedArticles[idx];
+                    this._feedArticles[idx] = {
+                        ...article,
+                        _siteTitle: prev._siteTitle,
+                        _siteLabel: prev._siteLabel,
+                        _siteId: prev._siteId,
+                    };
+                    const row = document.querySelector(`.feed-row[data-article-id="${articleId}"]`);
+                    if (row) {
+                        const tmp = document.createElement('div');
+                        tmp.innerHTML = this.renderArticleListItem(this._feedArticles[idx]);
+                        row.replaceWith(tmp.firstElementChild);
+                    }
+                }
+            }).catch(() => {});
+        }
         if (this.selectedArticleId === articleId) {
             this.fetchArticle(articleId)
                 .then(async (article) => {
+                    const cached = this._feedArticles.find((a) => a.id === articleId);
+                    if (cached?._siteLabel) article._siteLabel = cached._siteLabel;
+                    if (cached?._siteTitle) article._siteTitle = cached._siteTitle;
                     this.renderArticleReader(article, { loading: false });
                     if (data.status === 'ok') {
                         await this._maybeStartAnalysis(articleId, article);
@@ -1397,9 +3255,11 @@ class StreamNewsApp {
                 `Site #${siteId} supprimé (${d.pages || 0} pages, ${d.feeds || 0} feeds, ${d.articles || 0} articles)`,
                 'success'
             );
-            const resultsCard = document.getElementById('resultsCard');
-            if (resultsCard) resultsCard.style.display = 'none';
+            this.viewingSiteId = null;
+            this.selectedArticleId = null;
             await this.loadSites();
+            await this.loadFeed({ keepSelection: false });
+            this.showView('feed');
         } catch (err) {
             console.error(err);
             this.updateStatus(`Erreur: ${err.message}`, 'error');
@@ -1425,60 +3285,133 @@ class StreamNewsApp {
     }
 
     updateStatus(message, type) {
+        const settings = this.loadSettings();
+        if (settings.toasts === false && type !== 'error') return;
+
         const statusDiv = document.getElementById('status');
+        if (!statusDiv) return;
         statusDiv.textContent = message;
-        statusDiv.className = `status ${type}`;
+        // garder status-toast sinon le bandeau redevient une "page" legacy en haut
+        statusDiv.className = `status status-toast ${type || 'info'}`;
         statusDiv.style.display = 'block';
-        
-        setTimeout(() => {
+
+        clearTimeout(this._statusTimer);
+        this._statusTimer = setTimeout(() => {
             statusDiv.style.display = 'none';
-        }, 5000);
+        }, 4500);
     }
 
     showLoading(show) {
-        const loadingDiv = document.getElementById('loading');
+        const progress = document.getElementById('addSourceProgress');
         const analyzeBtn = document.getElementById('analyzeBtn');
         const stopBtn = document.getElementById('stopAnalyzeBtn');
-        
+        const form = document.getElementById('analyzeForm');
+        const actions = document.getElementById('addSourceActions');
+        const legacyLoading = document.getElementById('loading');
+
+        window.SN?.bus?.emit('add-source:busy', show);
+
         if (show) {
-            loadingDiv.style.display = 'block';
-            analyzeBtn.disabled = true;
+            if (progress) progress.hidden = false;
+            if (legacyLoading) legacyLoading.style.display = 'block';
+            if (analyzeBtn) analyzeBtn.disabled = true;
+            if (actions) actions.hidden = true;
             if (stopBtn) stopBtn.disabled = false;
+            if (form) form.hidden = true;
+            const bar = document.getElementById('addSourceProgressBar');
+            if (bar) {
+                bar.setAttribute('indeterminate', '');
+                bar.removeAttribute('value');
+            }
+            const fill = document.getElementById('addSourceProgressFill');
+            if (fill) fill.style.width = '8%';
         } else {
-            loadingDiv.style.display = 'none';
-            analyzeBtn.disabled = false;
+            if (progress && document.getElementById('addSourceVictory')?.hidden !== false) {
+                progress.hidden = true;
+            }
+            if (legacyLoading) legacyLoading.style.display = 'none';
+            if (analyzeBtn) {
+                analyzeBtn.disabled = false;
+                analyzeBtn.hidden = false;
+            }
+            if (actions) actions.hidden = false;
             if (stopBtn) stopBtn.disabled = false;
         }
     }
 
     setLoadingText(text) {
+        const label = document.getElementById('addSourceProgressLabel');
+        if (label) label.textContent = text;
         const loadingDiv = document.getElementById('loading');
         const progressText = loadingDiv && loadingDiv.querySelector('p');
         if (progressText) progressText.textContent = text;
+        window.SN?.bus?.emit('add-source:progress', { text });
     }
 
     updateProgress(current, total) {
-        const loadingDiv = document.getElementById('loading');
-        const progressText = loadingDiv.querySelector('p');
-        if (!progressText) return;
-
         const cur = Number(current);
         const tot = Number(total);
         const safeCur = Number.isFinite(cur) && cur >= 0 ? cur : 0;
         const safeTot = Number.isFinite(tot) && tot > 0 ? tot : null;
+        const fill = document.getElementById('addSourceProgressFill');
+        const bar = document.getElementById('addSourceProgressBar');
+        let text = 'Discovery des liens...';
+        let value = null;
 
         if (safeTot == null) {
-            progressText.textContent = safeCur > 0
+            text = safeCur > 0
                 ? `Analyse en cours... ${safeCur} page(s)`
                 : 'Discovery des liens...';
-            return;
+            if (fill) fill.style.width = `${Math.min(40, 8 + safeCur * 2)}%`;
+            if (bar) bar.setAttribute('indeterminate', '');
+        } else {
+            const percentage = Math.min(100, Math.max(0, Math.round((safeCur / safeTot) * 100)));
+            value = percentage / 100;
+            if (fill) fill.style.width = `${Math.max(8, percentage)}%`;
+            if (bar) {
+                bar.removeAttribute('indeterminate');
+                bar.setAttribute('value', String(value));
+            }
+            text = safeCur >= safeTot
+                ? `Crawl terminé (${safeCur} page${safeCur > 1 ? 's' : ''}) — import des articles...`
+                : `Analyse en cours... ${safeCur}/${safeTot} pages (${percentage}%)`;
         }
 
-        const percentage = Math.min(100, Math.max(0, Math.round((safeCur / safeTot) * 100)));
-        if (safeCur >= safeTot) {
-            progressText.textContent = `Crawl terminé (${safeCur} page${safeCur > 1 ? 's' : ''}) — import des articles...`;
-        } else {
-            progressText.textContent = `Analyse en cours... ${safeCur}/${safeTot} pages (${percentage}%)`;
+        this.setLoadingText(text);
+        window.SN?.bus?.emit('add-source:progress', { text, value });
+    }
+
+    /**
+     * Si le crawl a trouve des flux mais 0 article (chord Celery rate / timeout),
+     * on reimporte en synchrone via l'API analyzer.
+     */
+    async ensureSiteArticles(siteId) {
+        const id = Number(siteId);
+        if (!id) return 0;
+        try {
+            const res = await fetch(`/api/sites/${id}/articles?limit=5`);
+            const data = res.ok ? await res.json() : { articles: [] };
+            const existing = (data.articles || []).length;
+            if (existing > 0) return existing;
+
+            const siteRes = await fetch(`/api/sites/${id}`);
+            const site = siteRes.ok ? await siteRes.json() : null;
+            const feeds = this.parseRssFeeds(site?.rss_feeds);
+            if (!feeds.length) return 0;
+
+            this.updateStatus('Import des articles RSS…', 'info');
+            const ingestRes = await fetch(`/api/sites/${id}/ingest-articles`, { method: 'POST' });
+            const ingest = ingestRes.ok ? await ingestRes.json() : {};
+            const count = Number(ingest.articles_count) || 0;
+            if (count > 0) {
+                this.updateStatus(`${count} articles importes`, 'success');
+            } else {
+                this.updateStatus('Aucun article dans ces flux', 'info');
+            }
+            return count;
+        } catch (err) {
+            console.warn('ensureSiteArticles', err);
+            return 0;
         }
     }
 
@@ -1488,6 +3421,7 @@ class StreamNewsApp {
     _watchAnalysisFinish(siteId) {
         const started = Date.now();
         const maxMs = 15 * 60 * 1000;
+        let ingestFallbackAt = 0;
         const tick = async () => {
             if (!this.sameSite(siteId)) return;
             if (Date.now() - started > maxMs) {
@@ -1501,26 +3435,85 @@ class StreamNewsApp {
                 if (res.ok) {
                     const site = await res.json();
                     const st = site.status;
-                    if (st === 'completed' || st === 'error' || st === 'cancelled') {
+                    const feeds = this.parseRssFeeds(site.rss_feeds);
+
+                    // Import RSS encore en file Celery
+                    if (st === 'ingesting' || st === 'analyzing' || st === 'pending') {
+                        if (st === 'ingesting') {
+                            this.setLoadingText(`Import des articles (${feeds.length || '?'} flux)...`);
+                        }
+                        // Filet : si l'import Celery traine, on bascule sur l'API sync
+                        if (st === 'ingesting' && Date.now() - started > 45000 && !ingestFallbackAt) {
+                            ingestFallbackAt = Date.now();
+                            await this.ensureSiteArticles(siteId);
+                            // Re-check apres import sync
+                            const again = await fetch(`/api/sites/${siteId}/articles?limit=3`);
+                            const againData = again.ok ? await again.json() : { articles: [] };
+                            if ((againData.articles || []).length > 0) {
+                                this.updateJob(`crawl-site-${siteId}`, {
+                                    status: 'done',
+                                    detail: `${feeds.length} flux RSS · ${(againData.articles || []).length}+ articles`,
+                                });
+                                this._pendingVictorySiteId = siteId;
+                                const victory = document.getElementById('addSourceVictory');
+                                const victoryText = document.getElementById('addSourceVictoryText');
+                                const form = document.getElementById('analyzeForm');
+                                if (form) form.style.display = 'none';
+                                if (victory) {
+                                    victory.hidden = false;
+                                    if (victoryText) {
+                                        victoryText.textContent = `${feeds.length} flux trouves. Pret a lire.`;
+                                    }
+                                    this.openAddSourceModal({ keepVictory: true });
+                                }
+                                this.showLoading(false);
+                                this.currentAnalysis = null;
+                                await this.loadSites();
+                                return;
+                            }
+                        }
+                    } else if (st === 'completed' || st === 'error' || st === 'cancelled') {
                         if (st === 'completed') {
-                            const feeds = this.parseRssFeeds(site.rss_feeds);
+                            if (feeds.length) await this.ensureSiteArticles(siteId);
                             this.updateStatus(
                                 `Analyse terminée ! ${feeds.length} flux RSS`,
                                 'success'
                             );
-                            this.showSiteDetails(siteId);
+                            this.updateJob(`crawl-site-${siteId}`, {
+                                status: 'done',
+                                detail: `${feeds.length} flux RSS`,
+                            });
+                            this._pendingVictorySiteId = siteId;
+                            const victory = document.getElementById('addSourceVictory');
+                            const victoryText = document.getElementById('addSourceVictoryText');
+                            const form = document.getElementById('analyzeForm');
+                            if (form) form.style.display = 'none';
+                            if (victory) {
+                                victory.hidden = false;
+                                if (victoryText) {
+                                    victoryText.textContent = `${feeds.length} flux trouves. Pret a lire.`;
+                                }
+                                this.openAddSourceModal({ keepVictory: true });
+                            } else {
+                                this.showView('feed');
+                            }
+                            const filter = document.getElementById('feedFilter');
+                            if (filter) filter.value = String(siteId);
+                            await this.loadFeed({ keepSelection: false });
                         } else if (st === 'error') {
                             this.updateStatus('Analyse en erreur', 'error');
+                            this.updateJob(`crawl-site-${siteId}`, { status: 'error', detail: 'Erreur' });
+                            const form = document.getElementById('analyzeForm');
+                            if (form) form.style.display = '';
                         } else {
                             this.updateStatus('Analyse arrêtée', 'info');
+                            const form = document.getElementById('analyzeForm');
+                            if (form) form.style.display = '';
                         }
                         this.showLoading(false);
                         this.currentAnalysis = null;
                         await this.loadSites();
                         return;
-                    }
-                    if (st === 'analyzing' || st === 'pending') {
-                        // encore en cours (souvent phase ingest apres 100% crawl)
                     }
                 }
             } catch (_) {
@@ -1531,59 +3524,37 @@ class StreamNewsApp {
         setTimeout(tick, 8000);
     }
 
-    addPageLog(message, type) {
-        const resultsDiv = document.getElementById('results');
-        if (!resultsDiv.querySelector('.page-logs')) {
-            resultsDiv.innerHTML = '<div class="page-logs"></div>' + resultsDiv.innerHTML;
-        }
-        
-        const logsDiv = resultsDiv.querySelector('.page-logs');
-        const logEntry = document.createElement('div');
-        logEntry.className = `log-entry ${type}`;
-        logEntry.innerHTML = `<span class="time">${new Date().toLocaleTimeString()}</span> ${message}`;
-        logsDiv.appendChild(logEntry);
-        
-        // Garder seulement les 50 dernières entrées
-        while (logsDiv.children.length > 50) {
-            logsDiv.removeChild(logsDiv.firstChild);
-        }
+    addPageLog(_message, _type) {
+        // Ancien panneau #results desactive : le feedback vit dans le modal
     }
 
-    addRssFeed(data) {
-        const resultsDiv = document.getElementById('results');
-        if (!resultsDiv.querySelector('.rss-feeds')) {
-            resultsDiv.innerHTML = '<h4>Flux RSS trouvés</h4><div class="rss-feeds"></div>' + resultsDiv.innerHTML;
-        }
-        
-        const feedsDiv = resultsDiv.querySelector('.rss-feeds');
-        const feedDiv = document.createElement('div');
-        feedDiv.className = 'rss-feed new-feed';
-        feedDiv.innerHTML = `
-            <h4>${data.title || 'Flux RSS'}</h4>
-            <p><a href="${data.rss_url}" target="_blank">${data.rss_url}</a></p>
-            <small>Source: ${data.source_page}</small>
-        `;
-        feedsDiv.appendChild(feedDiv);
-        
-        // Animation pour le nouveau flux
-        setTimeout(() => feedDiv.classList.remove('new-feed'), 1000);
+    addRssFeed(_data) {
+        // Ancien panneau #results desactive
     }
 
     clearResults() {
         const resultsDiv = document.getElementById('results');
-        resultsDiv.innerHTML = '';
+        if (resultsDiv) {
+            resultsDiv.innerHTML = '';
+            resultsDiv.hidden = true;
+        }
+        const resultsCard = document.getElementById('resultsCard');
+        if (resultsCard) {
+            resultsCard.hidden = true;
+            resultsCard.style.display = 'none';
+        }
     }
 
     showResults() {
-        const resultsCard = document.getElementById('resultsCard');
-        resultsCard.style.display = 'block';
-        resultsCard.scrollIntoView({ behavior: 'smooth' });
+        // Ne plus afficher l'ancien panneau de resultats live
+        this.clearResults();
     }
 
     getStatusText(status) {
         const statusMap = {
             'pending': 'En attente',
             'analyzing': 'En cours',
+            'ingesting': 'Import RSS',
             'completed': 'Terminé',
             'error': 'Erreur',
             'cancelled': 'Arrêté',
@@ -1655,5 +3626,7 @@ const additionalStyles = `
 
 document.head.insertAdjacentHTML('beforeend', additionalStyles);
 
-// Initialisation de l'application
-const app = new StreamNewsApp(); 
+// Bootstrap via /js/main.js (ES module)
+const app = new StreamNewsApp();
+window.app = app;
+export default app; 

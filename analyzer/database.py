@@ -132,16 +132,67 @@ class Database:
         """
         do_reset = reset or os.getenv("STREAMNEWS_RESET_DB", "").strip() in ("1", "true", "yes")
 
-        from migrate import run_migrations
+        from migrate import run_migrations, _sync_database_url
+        import asyncio
 
-        run_migrations(self.database_url, reset=do_reset)
+        skip_migrate = (
+            self.is_sqlite
+            and not do_reset
+            and os.getenv("STREAMNEWS_SKIP_MIGRATE", "").strip() not in ("0", "false", "no")
+        )
+        if skip_migrate:
+            # Local Windows : alembic sous uvicorn peut rester bloque indefiniment.
+            # Si alembic_version existe, on considere la base a jour.
+            try:
+                import sqlite3
+                from pathlib import Path
+                from urllib.parse import unquote
+
+                sync_url = _sync_database_url(self.database_url)
+                raw = sync_url.replace("sqlite:///", "", 1).split("?")[0]
+                db_path = Path(unquote(raw))
+                if db_path.is_file():
+                    con = sqlite3.connect(str(db_path), timeout=5)
+                    try:
+                        row = con.execute(
+                            "SELECT version_num FROM alembic_version LIMIT 1"
+                        ).fetchone()
+                    finally:
+                        con.close()
+                    if row:
+                        skip_migrate = True
+                    else:
+                        skip_migrate = False
+                else:
+                    skip_migrate = False
+            except Exception:
+                skip_migrate = False
+
+        if not skip_migrate:
+            await asyncio.to_thread(
+                lambda: run_migrations(self.database_url, reset=do_reset)
+            )
 
         self.pool = await create_pool(self.database_url)
         self.backend = getattr(self.pool, "backend", self.backend)
 
         if not getattr(self, "_dedupe_ensured", False):
             deleted = await self.ensure_article_dedupe()
-            dup_sites = await self.ensure_site_domain_unique()
+            dup_sites = 0
+            # Sur SQLite local ce backfill peut bloquer aiosqlite (ALTER / sync feeds).
+            # Les domaines sont deja en place apres migrations ; on saute au startup.
+            if not self.is_sqlite:
+                try:
+                    import asyncio
+                    dup_sites = await asyncio.wait_for(
+                        self.ensure_site_domain_unique(),
+                        timeout=20.0,
+                    )
+                except Exception as exc:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "ensure_site_domain_unique ignoree au startup: %s", exc
+                    )
             self._dedupe_ensured = True
             if deleted or dup_sites:
                 import logging
@@ -187,14 +238,21 @@ class Database:
         from collections import defaultdict
 
         async with self.pool.acquire() as conn:
-            try:
-                await conn.execute(
-                    "ALTER TABLE sites ADD COLUMN IF NOT EXISTS domain VARCHAR(255)"
-                )
-            except Exception:
+            # SQLite ne comprend pas toujours "ADD COLUMN IF NOT EXISTS"
+            if self.is_sqlite:
+                try:
+                    cols = await conn.fetch("PRAGMA table_info(sites)")
+                    names = {r["name"] for r in cols}
+                    if "domain" not in names:
+                        await conn.execute(
+                            "ALTER TABLE sites ADD COLUMN domain VARCHAR(255)"
+                        )
+                except Exception:
+                    pass
+            else:
                 try:
                     await conn.execute(
-                        "ALTER TABLE sites ADD COLUMN domain VARCHAR(255)"
+                        "ALTER TABLE sites ADD COLUMN IF NOT EXISTS domain VARCHAR(255)"
                     )
                 except Exception:
                     pass
@@ -593,6 +651,20 @@ class Database:
         articles = await ArticlesRepository(
             self.pool, is_sqlite=self.is_sqlite
         ).list_by_site(site_id, limit=limit, with_body=False)
+        return [a.to_api_dict() for a in articles]
+
+    async def search_articles(
+        self,
+        query: str,
+        *,
+        site_id: Optional[int] = None,
+        limit: int = 40,
+    ) -> List[Dict]:
+        from repositories.articles_repo import ArticlesRepository
+
+        articles = await ArticlesRepository(
+            self.pool, is_sqlite=self.is_sqlite
+        ).search(query, site_id=site_id, limit=limit)
         return [a.to_api_dict() for a in articles]
 
     async def get_article(self, article_id: int) -> Optional[Dict]:
